@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title or "KM SurvdigitizeR Oracle" }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='/style.css') }}">
+</head>
+<body>
+    <header class="site-header">
+        <div>
+            <a href="/" class="brand">KM SurvdigitizeR Oracle</a>
+            <p class="subtitle">OpenAI-generated manifests + SurvdigitizeR batch runner</p>
+        </div>
+    </header>
+    <main class="page-shell">
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>
+

@@ -1,0 +1,12 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.zip
+data/uploads/
+data/manifests/
+data/results/
+data/exports/
+data/*.sqlite3
+

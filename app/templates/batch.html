@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="panel">
+    <div class="section-head">
+        <div>
+            <h1>{{ batch.label }}</h1>
+            <p class="panel-hint">Auto-approve threshold: {{ "%.2f"|format(threshold) }}</p>
+        </div>
+        <div class="actions">
+            <a href="/batches/{{ batch.id }}/export" class="btn btn-secondary">Export Batch</a>
+            <a href="/" class="btn btn-secondary">New Upload</a>
+        </div>
+    </div>
+    <div class="summary-row">
+        <span class="status {{ batch.status }}">{{ batch.status }}</span>
+        <span>{{ batch.image_count }} images</span>
+        <span>Updated {{ batch.updated_at }}</span>
+    </div>
+</section>
+
+<section class="panel">
+    <h2>Images</h2>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Filename</th>
+                    <th>Status</th>
+                    <th>Confidence</th>
+                    <th>Review</th>
+                    <th>Error</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for image in batch.images %}
+                <tr>
+                    <td>{{ image.filename }}</td>
+                    <td><span class="status {{ image.status }}">{{ image.status }}</span></td>
+                    <td>{% if image.llm_confidence is not none %}{{ "%.2f"|format(image.llm_confidence) }}{% else %}--{% endif %}</td>
+                    <td>{{ "Yes" if image.review_required else "No" }}</td>
+                    <td class="error-cell">{{ image.error_message or "" }}</td>
+                    <td><a href="/images/{{ image.id }}" class="btn btn-small">Open</a></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}
+

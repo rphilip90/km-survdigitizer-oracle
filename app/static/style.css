@@ -1,0 +1,283 @@
+:root {
+    --bg: #f3f4f6;
+    --panel: #ffffff;
+    --text: #1f2937;
+    --muted: #6b7280;
+    --border: #d1d5db;
+    --primary: #0f766e;
+    --primary-dark: #115e59;
+    --warning: #fff7ed;
+    --warning-border: #f97316;
+    --shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: linear-gradient(180deg, #ecfeff 0%, var(--bg) 180px);
+    color: var(--text);
+    font-family: Georgia, "Times New Roman", serif;
+}
+
+.site-header {
+    padding: 1.5rem 2rem 0;
+}
+
+.brand {
+    color: var(--text);
+    font-size: 1.8rem;
+    text-decoration: none;
+    font-weight: 700;
+}
+
+.subtitle {
+    margin: 0.35rem 0 0;
+    color: var(--muted);
+}
+
+.page-shell {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 1.5rem 2rem 3rem;
+    display: grid;
+    gap: 1rem;
+}
+
+.panel {
+    background: var(--panel);
+    border: 1px solid rgba(255, 255, 255, 0.8);
+    border-radius: 18px;
+    padding: 1.25rem;
+    box-shadow: var(--shadow);
+}
+
+.panel h1,
+.panel h2 {
+    margin-top: 0;
+}
+
+.panel-hint {
+    color: var(--muted);
+}
+
+.stack {
+    display: grid;
+    gap: 0.85rem;
+}
+
+label {
+    display: grid;
+    gap: 0.35rem;
+    font-size: 0.95rem;
+}
+
+input,
+select,
+textarea,
+button {
+    font: inherit;
+}
+
+input,
+select,
+textarea {
+    width: 100%;
+    padding: 0.7rem 0.8rem;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: #fff;
+}
+
+textarea {
+    resize: vertical;
+}
+
+.checkbox {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+.checkbox input {
+    width: auto;
+}
+
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.7rem 1rem;
+    border: none;
+    border-radius: 999px;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.btn-primary {
+    background: var(--primary);
+    color: #fff;
+}
+
+.btn-primary:hover {
+    background: var(--primary-dark);
+}
+
+.btn-secondary,
+.btn-small {
+    background: #e5e7eb;
+    color: var(--text);
+}
+
+.btn-small {
+    padding: 0.45rem 0.7rem;
+    border-radius: 10px;
+}
+
+.list-grid {
+    display: grid;
+    gap: 0.85rem;
+}
+
+.card-link {
+    display: grid;
+    gap: 0.4rem;
+    padding: 1rem;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    background: #f9fafb;
+    text-decoration: none;
+    color: inherit;
+}
+
+.card-link:hover {
+    border-color: var(--primary);
+}
+
+.card-head,
+.card-meta,
+.section-head,
+.actions,
+.summary-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.status {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.25rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    background: #e5e7eb;
+}
+
+.status.processing,
+.status.processing_manifest,
+.status.processing_digitizer {
+    background: #fff7ed;
+    color: #c2410c;
+}
+
+.status.needs_review {
+    background: #fff7ed;
+    color: #9a3412;
+}
+
+.status.completed {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.status.failed {
+    background: #fee2e2;
+    color: #b91c1c;
+}
+
+.table-wrap {
+    overflow-x: auto;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+th,
+td {
+    padding: 0.75rem;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    vertical-align: top;
+}
+
+.error-cell {
+    min-width: 240px;
+    color: #991b1b;
+}
+
+.two-col {
+    display: grid;
+    grid-template-columns: 1.1fr 1fr;
+    gap: 1rem;
+}
+
+.grid-two {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.85rem;
+}
+
+.image-preview {
+    width: 100%;
+    height: auto;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: #fff;
+}
+
+.warning-box {
+    margin-top: 0.75rem;
+    padding: 0.9rem 1rem;
+    border-left: 4px solid var(--warning-border);
+    background: var(--warning);
+    border-radius: 10px;
+}
+
+.artifact-list {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+}
+
+.artifact-list h3 {
+    margin: 0 0 0.75rem;
+    font-size: 1rem;
+}
+
+.artifact-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+}
+
+@media (max-width: 900px) {
+    .page-shell {
+        padding: 1rem;
+    }
+
+    .two-col,
+    .grid-two {
+        grid-template-columns: 1fr;
+    }
+}

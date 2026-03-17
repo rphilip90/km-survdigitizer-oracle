@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="panel">
+    <h1>New Batch</h1>
+    <p class="panel-hint">Upload a zip file or one or more images. High-confidence images run automatically; ambiguous ones pause for review.</p>
+    <form action="/batches" method="post" enctype="multipart/form-data" class="stack">
+        <label>
+            <span>Batch Label</span>
+            <input type="text" name="batch_label" placeholder="e.g. AML KM extraction 2026-03-17">
+        </label>
+        <label>
+            <span>Zip File</span>
+            <input type="file" name="zip_file" accept=".zip">
+        </label>
+        <label>
+            <span>Or Image Files</span>
+            <input type="file" name="images" accept="image/*" multiple>
+        </label>
+        <button type="submit" class="btn btn-primary">Create Batch</button>
+    </form>
+</section>
+
+<section class="panel">
+    <h2>Recent Batches</h2>
+    {% if batches %}
+        <div class="list-grid">
+            {% for batch in batches %}
+            <a href="/batches/{{ batch.id }}" class="card-link">
+                <div class="card-head">
+                    <strong>{{ batch.label }}</strong>
+                    <span class="status {{ batch.status }}">{{ batch.status }}</span>
+                </div>
+                <div class="card-meta">
+                    <span>{{ batch.image_count }} images</span>
+                    <span>{{ batch.created_at }}</span>
+                </div>
+            </a>
+            {% endfor %}
+        </div>
+    {% else %}
+        <p>No batches yet.</p>
+    {% endif %}
+</section>
+{% endblock %}
+

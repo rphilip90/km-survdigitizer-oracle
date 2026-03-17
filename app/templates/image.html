@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="panel">
+    <div class="section-head">
+        <div>
+            <h1>{{ image.filename }}</h1>
+            <p class="panel-hint">Batch <a href="/batches/{{ batch.id }}">{{ batch.label }}</a></p>
+        </div>
+        <div class="actions">
+            <span class="status {{ image.status }}">{{ image.status }}</span>
+            <form action="/images/{{ image.id }}/rerun" method="post">
+                <button type="submit" class="btn btn-primary">Rerun Image</button>
+            </form>
+        </div>
+    </div>
+    {% if image.error_message %}
+    <div class="warning-box">{{ image.error_message }}</div>
+    {% endif %}
+</section>
+
+<section class="two-col">
+    <div class="panel image-panel">
+        <h2>Source Image</h2>
+        <img src="/images/{{ image.id }}/raw" alt="{{ image.filename }}" class="image-preview">
+        {% if image.prepared_path or image.output_csv_path or image.output_meta_path or image.output_log_path %}
+        <div class="artifact-list">
+            <h3>Artifacts</h3>
+            <div class="artifact-links">
+                {% if image.prepared_path %}
+                <a href="/images/{{ image.id }}/artifact/prepared" class="btn btn-small">Prepared Image</a>
+                {% endif %}
+                {% if image.output_csv_path %}
+                <a href="/images/{{ image.id }}/artifact/csv" class="btn btn-small">CSV Output</a>
+                {% endif %}
+                {% if image.output_meta_path %}
+                <a href="/images/{{ image.id }}/artifact/meta" class="btn btn-small">Meta JSON</a>
+                {% endif %}
+                {% if image.output_log_path %}
+                <a href="/images/{{ image.id }}/artifact/log" class="btn btn-small">Run Log</a>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="panel">
+        <h2>Manifest Review</h2>
+        <form action="/images/{{ image.id }}/review" method="post" class="stack">
+            {% set manifest = image.manifest or {} %}
+            {% set review_flag = manifest.review_required if manifest else false %}
+            <div class="grid-two">
+                <label>
+                    <span>Number of Curves</span>
+                    <input type="number" name="num_curves" min="1" value="{{ manifest.num_curves or 1 }}">
+                </label>
+                <label>
+                    <span>LLM Confidence</span>
+                    <input type="number" name="llm_confidence" min="0" max="1" step="0.01" value="{{ manifest.llm_confidence if manifest else 1.0 }}">
+                </label>
+                <label>
+                    <span>X Start</span>
+                    <input type="number" name="x_start" step="0.01" value="{{ manifest.x_start if manifest else 0 }}">
+                </label>
+                <label>
+                    <span>X End</span>
+                    <input type="number" name="x_end" step="0.01" value="{{ manifest.x_end if manifest else 60 }}">
+                </label>
+                <label>
+                    <span>X Increment</span>
+                    <input type="number" name="x_increment" step="0.01" value="{{ manifest.x_increment if manifest else 5 }}">
+                </label>
+                <label>
+                    <span>Y Start</span>
+                    <input type="number" name="y_start" step="0.01" value="{{ manifest.y_start if manifest else 0 }}">
+                </label>
+                <label>
+                    <span>Y End</span>
+                    <input type="number" name="y_end" step="0.01" value="{{ manifest.y_end if manifest else 1 }}">
+                </label>
+                <label>
+                    <span>Y Increment</span>
+                    <input type="number" name="y_increment" step="0.01" value="{{ manifest.y_increment if manifest else 0.1 }}">
+                </label>
+                <label>
+                    <span>Rotation</span>
+                    <select name="rotation">
+                        {% set rotation = manifest.rotation if manifest and manifest.rotation is not none else 0 %}
+                        <option value="0" {% if rotation == 0 %}selected{% endif %}>0</option>
+                        <option value="90" {% if rotation == 90 %}selected{% endif %}>90</option>
+                        <option value="180" {% if rotation == 180 %}selected{% endif %}>180</option>
+                        <option value="270" {% if rotation == 270 %}selected{% endif %}>270</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Y Text Vertical</span>
+                    {% set y_vertical = manifest.y_text_vertical if manifest else false %}
+                    <select name="y_text_vertical">
+                        <option value="false" {% if not y_vertical %}selected{% endif %}>False</option>
+                        <option value="true" {% if y_vertical %}selected{% endif %}>True</option>
+                    </select>
+                </label>
+            </div>
+            <label>
+                <span>Crop Hint</span>
+                <input type="text" name="crop_hint" value="{{ manifest.crop_hint if manifest and manifest.crop_hint else '' }}" placeholder="Optional note only in v1">
+            </label>
+            <label>
+                <span>Notes</span>
+                <textarea name="notes" rows="4" placeholder="Reasons for review or manual changes">{{ manifest.notes if manifest and manifest.notes else '' }}</textarea>
+            </label>
+            <label class="checkbox">
+                <input type="checkbox" name="review_required" {% if review_flag %}checked{% endif %}>
+                <span>Keep this image in review</span>
+            </label>
+            <p class="panel-hint">If you clear "Keep this image in review", the rerun button will use the saved manifest even when the original confidence stays below the auto-approve threshold.</p>
+            <button type="submit" class="btn btn-primary">Save Review</button>
+        </form>
+    </div>
+</section>
+{% endblock %}
