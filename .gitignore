@@ -6,7 +6,10 @@ __pycache__/
 *.zip
 data/uploads/
 data/manifests/
+data/logs/
 data/results/
 data/exports/
 data/*.sqlite3
-
+data/*.html
+data/*.log
+data/test-inputs/

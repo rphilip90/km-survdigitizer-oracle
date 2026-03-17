@@ -26,7 +26,6 @@ class ManifestService:
 
         response = self.client.chat.completions.create(
             model=self.settings.openai_model,
-            temperature=0,
             response_format={"type": "json_object"},
             messages=[
                 {
@@ -97,4 +96,3 @@ Filename: {filename}
         cleaned = re.sub(r"^```json\s*", "", cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r"\s*```$", "", cleaned)
         return json.loads(cleaned)
-
