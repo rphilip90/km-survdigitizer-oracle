@@ -254,6 +254,53 @@ td {
     border-radius: 10px;
 }
 
+.state-banner {
+    margin-top: 1rem;
+    padding: 0.95rem 1rem;
+    border-radius: 12px;
+    display: grid;
+    gap: 0.3rem;
+}
+
+.state-banner strong {
+    font-size: 1rem;
+}
+
+.state-banner-processing {
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    color: #1d4ed8;
+}
+
+.state-banner-review {
+    background: #fff7ed;
+    border: 1px solid #fdba74;
+    color: #9a3412;
+}
+
+.state-banner-failed {
+    background: #fef2f2;
+    border: 1px solid #fca5a5;
+    color: #b91c1c;
+}
+
+.state-banner-completed {
+    background: #ecfdf5;
+    border: 1px solid #86efac;
+    color: #166534;
+}
+
+.status-stack {
+    display: grid;
+    gap: 0.35rem;
+}
+
+.status-copy {
+    color: var(--muted);
+    font-size: 0.88rem;
+    line-height: 1.35;
+}
+
 .artifact-list {
     margin-top: 1rem;
     padding-top: 1rem;

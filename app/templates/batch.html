@@ -1,6 +1,23 @@
 {% extends "base.html" %}
 
 {% block content %}
+{% set stage = namespace(manifest=0, digitizer=0, review=0, failed=0, completed=0, queued=0) %}
+{% for image in batch.images %}
+    {% if image.status == "processing_manifest" %}
+        {% set stage.manifest = stage.manifest + 1 %}
+    {% elif image.status == "processing_digitizer" %}
+        {% set stage.digitizer = stage.digitizer + 1 %}
+    {% elif image.status == "needs_review" %}
+        {% set stage.review = stage.review + 1 %}
+    {% elif image.status == "failed" %}
+        {% set stage.failed = stage.failed + 1 %}
+    {% elif image.status == "completed" %}
+        {% set stage.completed = stage.completed + 1 %}
+    {% else %}
+        {% set stage.queued = stage.queued + 1 %}
+    {% endif %}
+{% endfor %}
+
 <section class="panel">
     <div class="section-head">
         <div>
@@ -17,6 +34,38 @@
         <span>{{ batch.image_count }} images</span>
         <span>Updated {{ batch.updated_at }}</span>
     </div>
+
+    {% if batch.status in ["queued", "processing"] %}
+    <div class="state-banner state-banner-processing">
+        <strong>Work in progress.</strong>
+        <span>This page refreshes automatically every 5 seconds while the batch is active.</span>
+        {% if stage.manifest %}
+        <span>{{ stage.manifest }} image{{ "" if stage.manifest == 1 else "s" }} currently in manifest generation.</span>
+        {% endif %}
+        {% if stage.digitizer %}
+        <span>{{ stage.digitizer }} image{{ "" if stage.digitizer == 1 else "s" }} currently running through SurvdigitizeR.</span>
+        {% endif %}
+        {% if stage.queued %}
+        <span>{{ stage.queued }} image{{ "" if stage.queued == 1 else "s" }} still queued.</span>
+        {% endif %}
+    </div>
+    {% elif batch.status == "needs_review" %}
+    <div class="state-banner state-banner-review">
+        <strong>Paused for review.</strong>
+        <span>The batch is not running anymore. One or more images were marked low-confidence and need manual confirmation before rerun.</span>
+        <span>Open the image, correct the manifest if needed, clear "Keep this image in review", save, then click "Rerun Image".</span>
+    </div>
+    {% elif batch.status == "failed" %}
+    <div class="state-banner state-banner-failed">
+        <strong>Batch failed.</strong>
+        <span>At least one image failed before completion. Open the image row to inspect the error or rerun after fixing the manifest.</span>
+    </div>
+    {% elif batch.status == "completed" %}
+    <div class="state-banner state-banner-completed">
+        <strong>Batch completed.</strong>
+        <span>All images finished processing. You can open individual results or export the batch bundle.</span>
+    </div>
+    {% endif %}
 </section>
 
 <section class="panel">
@@ -37,7 +86,26 @@
                 {% for image in batch.images %}
                 <tr>
                     <td>{{ image.filename }}</td>
-                    <td><span class="status {{ image.status }}">{{ image.status }}</span></td>
+                    <td>
+                        <div class="status-stack">
+                            <span class="status {{ image.status }}">{{ image.status }}</span>
+                            <span class="status-copy">
+                                {% if image.status == "processing_manifest" %}
+                                OpenAI is reading axes and curve count.
+                                {% elif image.status == "processing_digitizer" %}
+                                SurvdigitizeR is extracting coordinates.
+                                {% elif image.status == "needs_review" %}
+                                Paused until you confirm or edit the manifest.
+                                {% elif image.status == "failed" %}
+                                Processing stopped with an error.
+                                {% elif image.status == "completed" %}
+                                Extraction finished successfully.
+                                {% else %}
+                                Waiting to start.
+                                {% endif %}
+                            </span>
+                        </div>
+                    </td>
                     <td>{% if image.llm_confidence is not none %}{{ "%.2f"|format(image.llm_confidence) }}{% else %}--{% endif %}</td>
                     <td>{{ "Yes" if image.review_required else "No" }}</td>
                     <td class="error-cell">{{ image.error_message or "" }}</td>
@@ -48,5 +116,11 @@
         </table>
     </div>
 </section>
+{% if batch.status in ["queued", "processing"] %}
+<script>
+window.setTimeout(function () {
+    window.location.reload();
+}, 5000);
+</script>
+{% endif %}
 {% endblock %}
-
