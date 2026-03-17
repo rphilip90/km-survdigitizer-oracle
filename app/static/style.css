@@ -329,6 +329,57 @@ td {
     gap: 0.75rem;
 }
 
+.log-list {
+    display: grid;
+    gap: 0.75rem;
+}
+
+.log-entry {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 0.85rem 0.95rem;
+    background: #f9fafb;
+}
+
+.log-entry-warning {
+    border-color: #fdba74;
+    background: #fff7ed;
+}
+
+.log-entry-error {
+    border-color: #fca5a5;
+    background: #fef2f2;
+}
+
+.log-entry-info {
+    border-color: #bfdbfe;
+    background: #eff6ff;
+}
+
+.log-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.35rem;
+}
+
+.log-stage {
+    font-weight: 700;
+    text-transform: uppercase;
+    font-size: 0.82rem;
+    letter-spacing: 0.04em;
+}
+
+.log-time {
+    color: var(--muted);
+    font-size: 0.85rem;
+}
+
+.log-message {
+    line-height: 1.45;
+}
+
 @media (max-width: 900px) {
     .page-shell {
         padding: 1rem;

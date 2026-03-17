@@ -53,6 +53,7 @@ class DigitizerRunner:
         result = subprocess.run(
             [
                 self.settings.rscript_bin,
+                "--vanilla",
                 str(self.settings.runner_script),
                 "--image",
                 str(prepared_path),
@@ -71,7 +72,7 @@ class DigitizerRunner:
         output_log_path.write_text(
             "\n".join(
                 [
-                    f"Command: {self.settings.rscript_bin} {self.settings.runner_script}",
+                    f"Command: {self.settings.rscript_bin} --vanilla {self.settings.runner_script}",
                     f"Prepared image: {prepared_path}",
                     "",
                     "STDOUT:",
@@ -88,5 +89,11 @@ class DigitizerRunner:
         if result.returncode != 0:
             message = (result.stderr or result.stdout or "SurvdigitizeR run failed").strip()
             raise RuntimeError(message)
+
+        if not output_csv_path.exists():
+            raise RuntimeError("SurvdigitizeR finished without writing the CSV output.")
+
+        if not output_meta_path.exists():
+            raise RuntimeError("SurvdigitizeR finished without writing the metadata output.")
 
         return prepared_path, output_csv_path, output_meta_path, output_log_path

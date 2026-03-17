@@ -56,6 +56,7 @@ def init_db(settings: Settings) -> None:
                 output_csv_path TEXT,
                 output_meta_path TEXT,
                 output_log_path TEXT,
+                processing_log_json TEXT NOT NULL DEFAULT '[]',
                 error_message TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
@@ -66,6 +67,7 @@ def init_db(settings: Settings) -> None:
             """
         )
         ensure_column(connection, "images", "output_log_path", "TEXT")
+        ensure_column(connection, "images", "processing_log_json", "TEXT")
 
 
 def row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -96,10 +98,10 @@ def create_image(settings: Settings, batch_id: str, filename: str, original_path
         connection.execute(
             """
             INSERT INTO images (
-                id, batch_id, filename, original_path, status, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                id, batch_id, filename, original_path, status, processing_log_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (image_id, batch_id, filename, original_path, "queued", now, now),
+            (image_id, batch_id, filename, original_path, "queued", "[]", now, now),
         )
         connection.commit()
     refresh_batch_status(settings, batch_id)
@@ -205,6 +207,52 @@ def serialize_manifest(manifest: dict[str, Any] | None) -> str | None:
     return json.dumps(manifest, indent=2)
 
 
+def append_image_log(
+    settings: Settings,
+    image_id: str,
+    stage: str,
+    message: str,
+    level: str = "info",
+) -> dict[str, Any] | None:
+    timestamp = utc_now()
+    entry = {
+        "timestamp": timestamp,
+        "stage": stage,
+        "level": level,
+        "message": message,
+    }
+
+    with connect(settings.db_path) as connection:
+        row = connection.execute(
+            "SELECT batch_id, processing_log_json FROM images WHERE id = ?",
+            (image_id,),
+        ).fetchone()
+        if not row:
+            return None
+
+        existing_logs = []
+        if row["processing_log_json"]:
+            existing_logs = json.loads(row["processing_log_json"])
+        existing_logs.append(entry)
+        existing_logs = existing_logs[-50:]
+
+        connection.execute(
+            """
+            UPDATE images
+            SET processing_log_json = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (json.dumps(existing_logs, indent=2), timestamp, image_id),
+        )
+        connection.execute(
+            "UPDATE batches SET updated_at = ? WHERE id = ?",
+            (timestamp, row["batch_id"]),
+        )
+        connection.commit()
+
+    return entry
+
+
 def deserialize_image_row(image: dict[str, Any] | None) -> dict[str, Any] | None:
     if image is None:
         return None
@@ -212,6 +260,11 @@ def deserialize_image_row(image: dict[str, Any] | None) -> dict[str, Any] | None
         image["manifest"] = json.loads(image["manifest_json"])
     else:
         image["manifest"] = None
+    if image.get("processing_log_json"):
+        image["processing_log"] = json.loads(image["processing_log_json"])
+    else:
+        image["processing_log"] = []
+    image["latest_log"] = image["processing_log"][-1] if image["processing_log"] else None
     image["review_required"] = bool(image.get("review_required"))
     return image
 

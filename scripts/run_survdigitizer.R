@@ -23,28 +23,39 @@ if (!requireNamespace("SurvdigitizeR", quietly = TRUE)) {
 
 manifest <- jsonlite::fromJSON(manifest_path, simplifyVector = TRUE)
 
-result <- SurvdigitizeR::survival_digitize(
-  img_path = image_path,
-  num_curves = manifest$num_curves,
-  x_start = manifest$x_start,
-  x_end = manifest$x_end,
-  x_increment = manifest$x_increment,
-  y_start = manifest$y_start,
-  y_end = manifest$y_end,
-  y_increment = manifest$y_increment,
-  y_text_vertical = manifest$y_text_vertical,
-  attempt_OCR = FALSE,
-  censoring = FALSE
+result <- tryCatch(
+  SurvdigitizeR::survival_digitize(
+    img_path = image_path,
+    num_curves = manifest$num_curves,
+    x_start = manifest$x_start,
+    x_end = manifest$x_end,
+    x_increment = manifest$x_increment,
+    y_start = manifest$y_start,
+    y_end = manifest$y_end,
+    y_increment = manifest$y_increment,
+    y_text_vertical = manifest$y_text_vertical,
+    attempt_OCR = FALSE,
+    censoring = FALSE
+  ),
+  error = function(error) {
+    stop(
+      sprintf("SurvdigitizeR failed: %s", conditionMessage(error)),
+      call. = FALSE
+    )
+  }
 )
+
+if (!is.data.frame(result) || nrow(result) == 0) {
+  stop("SurvdigitizeR did not return a non-empty data frame.", call. = FALSE)
+}
 
 utils::write.csv(result, output_csv_path, row.names = FALSE)
 
-summary <- list(
+meta <- list(
   image = basename(image_path),
   rows = nrow(result),
   columns = names(result),
   curves = if ("curve" %in% names(result)) sort(unique(result$curve)) else NULL
 )
 
-jsonlite::write_json(summary, output_meta_path, auto_unbox = TRUE, pretty = TRUE)
-
+jsonlite::write_json(meta, output_meta_path, auto_unbox = TRUE, pretty = TRUE)

@@ -24,6 +24,15 @@
     {% if image.error_message %}
     <div class="warning-box">{{ image.error_message }}</div>
     {% endif %}
+    {% if image.status in ["queued", "processing_manifest", "processing_digitizer"] %}
+    <div class="state-banner state-banner-processing">
+        <strong>Work in progress.</strong>
+        <span>This page refreshes automatically every 5 seconds while the image is running.</span>
+        {% if image.latest_log %}
+        <span>{{ image.latest_log.message }}</span>
+        {% endif %}
+    </div>
+    {% endif %}
 </section>
 
 <section class="two-col">
@@ -128,4 +137,29 @@
         </form>
     </div>
 </section>
+<section class="panel">
+    <h2>Processing Timeline</h2>
+    {% if image.processing_log %}
+    <div class="log-list">
+        {% for entry in image.processing_log|reverse %}
+        <div class="log-entry log-entry-{{ entry.level }}">
+            <div class="log-head">
+                <span class="log-stage">{{ entry.stage }}</span>
+                <span class="log-time">{{ entry.timestamp }}</span>
+            </div>
+            <div class="log-message">{{ entry.message }}</div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="panel-hint">No processing events recorded yet.</p>
+    {% endif %}
+</section>
+{% if image.status in ["queued", "processing_manifest", "processing_digitizer"] %}
+<script>
+window.setTimeout(function () {
+    window.location.reload();
+}, 5000);
+</script>
+{% endif %}
 {% endblock %}

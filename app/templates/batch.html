@@ -108,7 +108,7 @@
                     </td>
                     <td>{% if image.llm_confidence is not none %}{{ "%.2f"|format(image.llm_confidence) }}{% else %}--{% endif %}</td>
                     <td>{{ "Yes" if image.review_required else "No" }}</td>
-                    <td class="error-cell">{{ image.error_message or "" }}</td>
+                    <td class="error-cell">{{ image.error_message or (image.latest_log.message if image.latest_log else "") }}</td>
                     <td><a href="/images/{{ image.id }}" class="btn btn-small">Open</a></td>
                 </tr>
                 {% endfor %}

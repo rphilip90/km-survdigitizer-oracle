@@ -17,6 +17,7 @@ from .manifest_service import ManifestService
 from .runner import DigitizerRunner
 from .schemas import ImageManifest
 from .store import (
+    append_image_log,
     create_batch,
     create_image,
     get_batch,
@@ -94,7 +95,8 @@ async def create_batch_route(
         unique_name = uniquify_filename(filename, seen_names)
         destination = batch_dir / unique_name
         destination.write_bytes(content)
-        create_image(settings, batch_id=batch_id, filename=unique_name, original_path=str(destination))
+        image_id = create_image(settings, batch_id=batch_id, filename=unique_name, original_path=str(destination))
+        append_image_log(settings, image_id, "queued", "Image uploaded and queued for processing.")
 
     executor.submit(process_batch, batch_id)
 
@@ -215,6 +217,17 @@ async def save_review(
             else None
         ),
     )
+    append_image_log(
+        settings,
+        image_id,
+        "review_saved",
+        (
+            "Review saved and image queued for digitization."
+            if rerun_requested and not manifest.review_required
+            else "Review saved; image remains paused for manual review."
+        ),
+        level="info" if not manifest.review_required else "warning",
+    )
 
     if rerun_requested and not manifest.review_required:
         executor.submit(process_single_image, image_id, False)
@@ -236,8 +249,16 @@ def rerun_image(image_id: str):
             status="needs_review",
             error_message="Clear 'Keep this image in review' and save before rerun.",
         )
+        append_image_log(
+            settings,
+            image_id,
+            "rerun_blocked",
+            "Rerun was blocked because the image is still marked for review.",
+            level="warning",
+        )
         return RedirectResponse(url=f"/images/{image_id}", status_code=303)
 
+    append_image_log(settings, image_id, "rerun_requested", "Manual rerun requested.")
     executor.submit(process_single_image, image_id, False)
     return RedirectResponse(url=f"/images/{image_id}", status_code=303)
 
@@ -271,6 +292,7 @@ def process_single_image(image_id: str, regenerate_manifest: bool) -> None:
 
     try:
         if regenerate_manifest or not image.get("manifest"):
+            append_image_log(settings, image_id, "processing_manifest", "Generating manifest from uploaded image.")
             update_image(settings, image_id, status="processing_manifest", error_message=None)
             manifest = manifest_service.generate_manifest(
                 image_id=image["id"],
@@ -284,8 +306,15 @@ def process_single_image(image_id: str, regenerate_manifest: bool) -> None:
                 llm_confidence=manifest.llm_confidence,
                 review_required=1 if manifest.review_required else 0,
             )
+            append_image_log(
+                settings,
+                image_id,
+                "manifest_generated",
+                f"Manifest generated at confidence {manifest.llm_confidence:.2f}.",
+            )
         else:
             manifest = ImageManifest.model_validate(image["manifest"])
+            append_image_log(settings, image_id, "manifest_loaded", "Using the saved reviewed manifest.")
 
         requires_review = (
             manifest.should_review(settings.auto_approve_threshold)
@@ -304,8 +333,16 @@ def process_single_image(image_id: str, regenerate_manifest: bool) -> None:
                     else f"Confidence {manifest.llm_confidence:.2f} is below auto-approve threshold."
                 ),
             )
+            append_image_log(
+                settings,
+                image_id,
+                "needs_review",
+                "Processing paused because the manifest needs manual review.",
+                level="warning",
+            )
             return
 
+        append_image_log(settings, image_id, "processing_digitizer", "Running SurvdigitizeR extraction.")
         update_image(settings, image_id, status="processing_digitizer", error_message=None)
         prepared_path, output_csv_path, output_meta_path, output_log_path = digitizer_runner.run(
             batch_id=image["batch_id"],
@@ -324,8 +361,21 @@ def process_single_image(image_id: str, regenerate_manifest: bool) -> None:
             error_message=None,
             review_required=0,
         )
+        append_image_log(
+            settings,
+            image_id,
+            "completed",
+            "Digitization completed and artifacts were written successfully.",
+        )
     except Exception as error:  # noqa: BLE001
         update_image(settings, image_id, status="failed", error_message=str(error))
+        append_image_log(
+            settings,
+            image_id,
+            "failed",
+            str(error),
+            level="error",
+        )
 
 
 def build_export_archive(batch: dict) -> Path:
