@@ -181,6 +181,9 @@ async def save_review(
     if not image:
         raise HTTPException(status_code=404, detail="Image not found")
 
+    rerun_requested = rerun_after_save == "true"
+    keep_in_review = review_required == "on" and not rerun_requested
+
     manifest = ImageManifest(
         image_id=image["id"],
         filename=image["filename"],
@@ -196,7 +199,7 @@ async def save_review(
         crop_hint=crop_hint or None,
         notes=notes or None,
         llm_confidence=llm_confidence,
-        review_required=review_required == "on",
+        review_required=keep_in_review,
     )
 
     update_image(
@@ -205,7 +208,7 @@ async def save_review(
         manifest_json=serialize_manifest(manifest.model_dump()),
         llm_confidence=manifest.llm_confidence,
         review_required=1 if manifest.review_required else 0,
-        status="needs_review",
+        status="queued" if rerun_requested and not manifest.review_required else "needs_review",
         error_message=(
             "Clear 'Keep this image in review' and save before rerun."
             if manifest.review_required
@@ -213,7 +216,7 @@ async def save_review(
         ),
     )
 
-    if rerun_after_save == "true" and not manifest.review_required:
+    if rerun_requested and not manifest.review_required:
         executor.submit(process_single_image, image_id, False)
 
     return RedirectResponse(url=f"/images/{image_id}", status_code=303)

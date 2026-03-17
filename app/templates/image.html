@@ -120,7 +120,7 @@
                 <input type="checkbox" name="review_required" {% if review_flag %}checked{% endif %}>
                 <span>Keep this image in review</span>
             </label>
-            <p class="panel-hint">If you clear "Keep this image in review", the saved manifest can run even when the original confidence stays below the auto-approve threshold.</p>
+            <p class="panel-hint">If you clear "Keep this image in review", the saved manifest can run even when the original confidence stays below the auto-approve threshold. "Save Review and Rerun" will clear that flag automatically.</p>
             <div class="form-actions">
                 <button type="submit" class="btn btn-secondary">Save Review</button>
                 <button type="submit" name="rerun_after_save" value="true" class="btn btn-primary">Save Review and Rerun</button>
