@@ -175,6 +175,7 @@ async def save_review(
     notes: str = Form(default=""),
     llm_confidence: float = Form(default=1.0),
     review_required: str | None = Form(default=None),
+    rerun_after_save: str | None = Form(default=None),
 ):
     image = get_image(settings, image_id)
     if not image:
@@ -205,8 +206,15 @@ async def save_review(
         llm_confidence=manifest.llm_confidence,
         review_required=1 if manifest.review_required else 0,
         status="needs_review",
-        error_message=None,
+        error_message=(
+            "Clear 'Keep this image in review' and save before rerun."
+            if manifest.review_required
+            else None
+        ),
     )
+
+    if rerun_after_save == "true" and not manifest.review_required:
+        executor.submit(process_single_image, image_id, False)
 
     return RedirectResponse(url=f"/images/{image_id}", status_code=303)
 
@@ -216,6 +224,17 @@ def rerun_image(image_id: str):
     image = get_image(settings, image_id)
     if not image:
         raise HTTPException(status_code=404, detail="Image not found")
+
+    manifest = image.get("manifest")
+    if manifest and manifest.get("review_required"):
+        update_image(
+            settings,
+            image_id,
+            status="needs_review",
+            error_message="Clear 'Keep this image in review' and save before rerun.",
+        )
+        return RedirectResponse(url=f"/images/{image_id}", status_code=303)
+
     executor.submit(process_single_image, image_id, False)
     return RedirectResponse(url=f"/images/{image_id}", status_code=303)
 
