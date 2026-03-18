@@ -8,6 +8,14 @@ read_flag <- function(flag) {
   args[index + 1]
 }
 
+read_optional_flag <- function(flag) {
+  index <- match(flag, args)
+  if (is.na(index) || index == length(args)) {
+    return(NULL)
+  }
+  args[index + 1]
+}
+
 handle_step_error <- function(error, step) {
   stop(sprintf("SurvdigitizeR failed in %s: %s", step, conditionMessage(error)), call. = FALSE)
 }
@@ -244,9 +252,11 @@ safe_range_detect <- function(step1_fig, step2_axes, x_start, x_end, x_increment
 
 image_path <- read_flag("--image")
 manifest_path <- read_flag("--manifest")
-output_csv_path <- read_flag("--output-csv")
-output_meta_path <- read_flag("--output-meta")
-output_overlay_json_path <- read_flag("--output-overlay-json")
+preview_only <- "--preview-only" %in% args
+output_review_json_path <- read_optional_flag("--output-review-json")
+output_csv_path <- if (preview_only) NULL else read_flag("--output-csv")
+output_meta_path <- if (preview_only) NULL else read_flag("--output-meta")
+output_overlay_json_path <- if (preview_only) NULL else read_flag("--output-overlay-json")
 
 if (!requireNamespace("jsonlite", quietly = TRUE)) {
   stop("The jsonlite package is required. Run Rscript scripts/bootstrap_r.R first.", call. = FALSE)
@@ -271,6 +281,39 @@ step2 <- tryCatch(
   SurvdigitizeR:::axes_identify(fig.hsl = step1, bg_lightness = 0.3),
   error = function(error) handle_step_error(error, "Step 2: Identifying axes")
 )
+
+if (!is.null(output_review_json_path)) {
+  plot_left <- max(0, min(step2$axes$xaxis) - 1)
+  plot_right <- max(0, max(step2$axes$xaxis) - 1)
+  plot_top <- max(0, dim(step1)[1] - max(step2$axes$yaxis))
+  plot_bottom <- max(0, dim(step1)[1] - min(step2$axes$yaxis))
+  review_json <- list(
+    image = basename(image_path),
+    width = dim(step1)[2],
+    height = dim(step1)[1],
+    plot_bounds = list(
+      left = plot_left,
+      right = plot_right,
+      top = plot_top,
+      bottom = plot_bottom
+    ),
+    axis_pixels = list(
+      x = list(
+        start = plot_left,
+        end = plot_right
+      ),
+      y = list(
+        start = plot_bottom,
+        end = plot_top
+      )
+    )
+  )
+  jsonlite::write_json(review_json, output_review_json_path, auto_unbox = TRUE, pretty = TRUE)
+}
+
+if (preview_only) {
+  quit(save = "no", status = 0)
+}
 
 step3 <- tryCatch(
   SurvdigitizeR:::fig_clean(

@@ -76,6 +76,46 @@ class MainFlowTests(unittest.TestCase):
         self.assertEqual(len(self.fake_executor.calls), 1)
         self.assertEqual(self.fake_executor.calls[0][0], main.process_single_image)
 
+    def test_save_review_generates_preview_when_image_stays_in_review(self) -> None:
+        prepared_path = self.root / "saved-prepared.png"
+        review_overlay_path = self.root / "saved-review.png"
+        prepared_path.write_text("prepared", encoding="utf-8")
+        review_overlay_path.write_text("overlay", encoding="utf-8")
+
+        with (
+            TestClient(main.app) as client,
+            mock.patch.object(
+                main.digitizer_runner,
+                "build_review_preview",
+                return_value=(prepared_path, review_overlay_path),
+            ),
+        ):
+            response = client.post(
+                f"/images/{self.image_id}/review",
+                data={
+                    "num_curves": 2,
+                    "llm_confidence": 0.4,
+                    "x_start": 0,
+                    "x_end": 60,
+                    "x_increment": 5,
+                    "y_start": 0,
+                    "y_end": 100,
+                    "y_increment": 25,
+                    "y_text_vertical": "true",
+                    "rotation": 0,
+                    "crop_hint": "",
+                    "notes": "preview-test",
+                    "review_required": "on",
+                },
+                follow_redirects=False,
+            )
+
+        self.assertEqual(response.status_code, 303)
+        image = get_image(self.settings, self.image_id)
+        self.assertTrue(image["review_required"])
+        self.assertEqual(image["status"], "needs_review")
+        self.assertEqual(Path(image["review_overlay_path"]), review_overlay_path)
+
     def test_process_single_image_logs_review_pause(self) -> None:
         manifest = ImageManifest(
             image_id=self.image_id,
@@ -94,14 +134,26 @@ class MainFlowTests(unittest.TestCase):
             llm_confidence=0.45,
             review_required=True,
         )
+        prepared_path = self.root / "review-prepared.png"
+        review_overlay_path = self.root / "review-overlay.png"
+        prepared_path.write_text("prepared", encoding="utf-8")
+        review_overlay_path.write_text("overlay", encoding="utf-8")
 
-        with mock.patch.object(main.manifest_service, "generate_manifest", return_value=manifest):
+        with (
+            mock.patch.object(main.manifest_service, "generate_manifest", return_value=manifest),
+            mock.patch.object(
+                main.digitizer_runner,
+                "build_review_preview",
+                return_value=(prepared_path, review_overlay_path),
+            ),
+        ):
             main.process_single_image(self.image_id, True)
 
         image = get_image(self.settings, self.image_id)
         self.assertEqual(image["status"], "needs_review")
+        self.assertEqual(Path(image["review_overlay_path"]), review_overlay_path)
         stages = [entry["stage"] for entry in image["processing_log"]]
-        self.assertEqual(stages, ["processing_manifest", "manifest_generated", "needs_review"])
+        self.assertEqual(stages, ["processing_manifest", "manifest_generated", "review_preview", "needs_review"])
 
     def test_process_single_image_uses_batch_threshold(self) -> None:
         update_batch(self.settings, self.batch_id, auto_approve_threshold=0.90)
@@ -122,13 +174,25 @@ class MainFlowTests(unittest.TestCase):
             llm_confidence=0.85,
             review_required=False,
         )
+        prepared_path = self.root / "threshold-prepared.png"
+        review_overlay_path = self.root / "threshold-overlay.png"
+        prepared_path.write_text("prepared", encoding="utf-8")
+        review_overlay_path.write_text("overlay", encoding="utf-8")
 
-        with mock.patch.object(main.manifest_service, "generate_manifest", return_value=manifest):
+        with (
+            mock.patch.object(main.manifest_service, "generate_manifest", return_value=manifest),
+            mock.patch.object(
+                main.digitizer_runner,
+                "build_review_preview",
+                return_value=(prepared_path, review_overlay_path),
+            ),
+        ):
             main.process_single_image(self.image_id, True)
 
         image = get_image(self.settings, self.image_id)
         self.assertEqual(image["status"], "needs_review")
         self.assertIn("below the batch threshold of 0.90", image["error_message"])
+        self.assertEqual(Path(image["review_overlay_path"]), review_overlay_path)
 
     def test_process_single_image_logs_runner_failure(self) -> None:
         manifest = ImageManifest(

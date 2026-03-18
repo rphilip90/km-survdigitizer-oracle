@@ -99,6 +99,32 @@ class RunnerTests(unittest.TestCase):
 
         self.assertTrue(output_annotated_path.exists())
 
+    def test_render_review_overlay_writes_png(self) -> None:
+        runner = DigitizerRunner(self.settings)
+        prepared_path = self.root / "review-prepared.png"
+        output_review_path = self.root / "review-overlay.png"
+        review_preview_path = self.root / "review.json"
+        Image.new("RGB", (120, 80), "white").save(prepared_path)
+        review_preview_path.write_text(
+            json.dumps(
+                {
+                    "width": 120,
+                    "height": 80,
+                    "plot_bounds": {
+                        "left": 20,
+                        "right": 100,
+                        "top": 10,
+                        "bottom": 60,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        runner.render_review_overlay(prepared_path, review_preview_path, output_review_path, self.manifest)
+
+        self.assertTrue(output_review_path.exists())
+
     def test_runner_requires_overlay_output(self) -> None:
         runner = DigitizerRunner(self.settings)
 

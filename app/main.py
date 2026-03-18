@@ -170,6 +170,7 @@ def image_artifact(image_id: str, kind: str):
 
     artifact_map = {
         "prepared": image.get("prepared_path"),
+        "review": image.get("review_overlay_path"),
         "annotated": image.get("annotated_path"),
         "csv": image.get("output_csv_path"),
         "meta": image.get("output_meta_path"),
@@ -225,18 +226,33 @@ async def save_review(
         review_required=keep_in_review,
     )
 
+    next_status = "queued" if rerun_requested and not manifest.review_required else "needs_review"
+    preview_fields: dict[str, str | None] = {}
+    preview_error = None
+    if next_status == "needs_review":
+        preview_fields, preview_error = ensure_review_preview(image, manifest)
+
+    error_message = (
+        "Clear 'Keep this image in review' and save before rerun."
+        if manifest.review_required
+        else None
+    )
+    if preview_error:
+        error_message = (
+            f"{error_message} Review grid preview failed: {preview_error}"
+            if error_message
+            else f"Review grid preview failed: {preview_error}"
+        )
+
     update_image(
         settings,
         image_id,
         manifest_json=serialize_manifest(manifest.model_dump()),
         llm_confidence=manifest.llm_confidence,
         review_required=1 if manifest.review_required else 0,
-        status="queued" if rerun_requested and not manifest.review_required else "needs_review",
-        error_message=(
-            "Clear 'Keep this image in review' and save before rerun."
-            if manifest.review_required
-            else None
-        ),
+        status=next_status,
+        error_message=error_message,
+        **preview_fields,
     )
     append_image_log(
         settings,
@@ -346,15 +362,20 @@ def process_single_image(image_id: str, regenerate_manifest: bool) -> None:
         )
 
         if requires_review:
+            preview_fields, preview_error = ensure_review_preview(image, manifest)
+            review_message = (
+                "Manifest needs review before digitization."
+                if manifest.review_required
+                else f"Confidence {manifest.llm_confidence:.2f} is below the batch threshold of {threshold:.2f}."
+            )
+            if preview_error:
+                review_message = f"{review_message} Review grid preview failed: {preview_error}"
             update_image(
                 settings,
                 image_id,
                 status="needs_review",
-                error_message=(
-                    "Manifest needs review before digitization."
-                    if manifest.review_required
-                    else f"Confidence {manifest.llm_confidence:.2f} is below the batch threshold of {threshold:.2f}."
-                ),
+                error_message=review_message,
+                **preview_fields,
             )
             append_image_log(
                 settings,
@@ -400,6 +421,37 @@ def process_single_image(image_id: str, regenerate_manifest: bool) -> None:
             str(error),
             level="error",
         )
+
+
+def ensure_review_preview(image: dict, manifest: ImageManifest) -> tuple[dict[str, str | None], str | None]:
+    try:
+        prepared_path, review_overlay_path = digitizer_runner.build_review_preview(
+            batch_id=image["batch_id"],
+            image_id=image["id"],
+            image_path=Path(image["original_path"]),
+            manifest=manifest,
+        )
+        append_image_log(
+            settings,
+            image["id"],
+            "review_preview",
+            "Generated a manifest grid preview for manual review.",
+        )
+        return {
+            "prepared_path": str(prepared_path),
+            "review_overlay_path": str(review_overlay_path),
+        }, None
+    except Exception as error:  # noqa: BLE001
+        append_image_log(
+            settings,
+            image["id"],
+            "review_preview_failed",
+            f"Review grid preview failed: {error}",
+            level="warning",
+        )
+        return {
+            "review_overlay_path": None,
+        }, str(error)
 
 
 def build_export_archive(batch: dict) -> Path:

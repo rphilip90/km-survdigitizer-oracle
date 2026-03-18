@@ -50,6 +50,7 @@ def init_db(settings: Settings) -> None:
                 filename TEXT NOT NULL,
                 original_path TEXT NOT NULL,
                 prepared_path TEXT,
+                review_overlay_path TEXT,
                 annotated_path TEXT,
                 manifest_json TEXT,
                 llm_confidence REAL,
@@ -70,6 +71,7 @@ def init_db(settings: Settings) -> None:
         )
         ensure_column(connection, "batches", "auto_approve_threshold", "REAL")
         ensure_column(connection, "images", "annotated_path", "TEXT")
+        ensure_column(connection, "images", "review_overlay_path", "TEXT")
         ensure_column(connection, "images", "output_log_path", "TEXT")
         ensure_column(connection, "images", "processing_log_json", "TEXT")
 
