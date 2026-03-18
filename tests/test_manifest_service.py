@@ -95,6 +95,15 @@ class ManifestParsingTests(unittest.TestCase):
                 "crop_top": "0.20",
                 "crop_right": "0.90",
                 "crop_bottom": "0.80",
+                "exclusion_regions": [
+                    {
+                        "left": 0.65,
+                        "top": 0.0,
+                        "right": 1.0,
+                        "bottom": 0.2,
+                        "label": "top summary",
+                    }
+                ],
                 "crop_hint": "exclude risk table",
                 "notes": None,
                 "llm_confidence": 0.7,
@@ -105,6 +114,8 @@ class ManifestParsingTests(unittest.TestCase):
         self.assertAlmostEqual(manifest.crop_left, 0.10)
         self.assertAlmostEqual(manifest.crop_bottom, 0.80)
         self.assertEqual(manifest.crop_hint, "exclude risk table")
+        self.assertEqual(len(manifest.exclusion_regions), 1)
+        self.assertEqual(manifest.exclusion_regions[0].label, "top summary")
 
 
 if __name__ == "__main__":

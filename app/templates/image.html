@@ -158,6 +158,11 @@
             </label>
             <p class="panel-hint">Crop bounds are normalized to the full source image: 0 is the top or left edge, 1 is the bottom or right edge.</p>
             <label>
+                <span>Exclusion Regions JSON</span>
+                <textarea name="exclusion_regions_json" rows="5" placeholder='[{"left":0.62,"top":0.02,"right":0.98,"bottom":0.22,"label":"top summary"}]'>{{ manifest.exclusion_regions | tojson(indent=2) if manifest and manifest.exclusion_regions else '[]' }}</textarea>
+            </label>
+            <p class="panel-hint">Use exclusion regions to blank out risk tables, hazard-ratio blocks, legends, or other non-plot content while preserving the full axes and tick marks.</p>
+            <label>
                 <span>Notes</span>
                 <textarea name="notes" rows="4" placeholder="Reasons for review or manual changes">{{ manifest.notes if manifest and manifest.notes else '' }}</textarea>
             </label>

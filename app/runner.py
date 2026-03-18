@@ -43,12 +43,23 @@ class DigitizerRunner:
             value is not None
             for value in [manifest.crop_left, manifest.crop_top, manifest.crop_right, manifest.crop_bottom]
         )
-        if rotation == 0 and not has_crop:
+        has_exclusions = bool(manifest.exclusion_regions)
+        if rotation == 0 and not has_crop and not has_exclusions:
             shutil.copy2(image_path, prepared_path)
             return prepared_path
 
         with Image.open(image_path) as image:
             working_image = image.copy()
+            if manifest.exclusion_regions:
+                fill_color = self._estimate_background_fill(working_image)
+                mask_draw = ImageDraw.Draw(working_image)
+                width, height = working_image.size
+                for region in manifest.exclusion_regions:
+                    left = int(width * region.left)
+                    top = int(height * region.top)
+                    right = int(width * region.right)
+                    bottom = int(height * region.bottom)
+                    mask_draw.rectangle((left, top, right, bottom), fill=fill_color)
 
             if has_crop:
                 width, height = working_image.size
@@ -320,6 +331,8 @@ class DigitizerRunner:
             f"X: {self._format_value(manifest.x_start)} to {self._format_value(manifest.x_end)} by {self._format_value(manifest.x_increment)}",
             f"Y: {self._format_value(manifest.y_start)} to {self._format_value(manifest.y_end)} by {self._format_value(manifest.y_increment)}",
         ]
+        if manifest.exclusion_regions:
+            labels.append(f"Masks: {len(manifest.exclusion_regions)}")
         anchor_x = int(max(8, left))
         anchor_y = int(max(8, top - 40))
 
@@ -386,3 +399,23 @@ class DigitizerRunner:
     @staticmethod
     def _clamp(value: float, minimum: float, maximum: float) -> float:
         return max(minimum, min(value, maximum))
+
+    @staticmethod
+    def _estimate_background_fill(image: Image.Image) -> tuple[int, ...]:
+        width, height = image.size
+        sample_points = [
+            (0, 0),
+            (max(0, width - 1), 0),
+            (0, max(0, height - 1)),
+            (max(0, width - 1), max(0, height - 1)),
+        ]
+        pixels = [image.getpixel(point) for point in sample_points]
+        if isinstance(pixels[0], int):
+            average = round(sum(int(pixel) for pixel in pixels) / len(pixels))
+            return (average,)
+
+        channel_count = len(pixels[0])
+        averages = []
+        for channel in range(channel_count):
+            averages.append(round(sum(int(pixel[channel]) for pixel in pixels) / len(pixels)))
+        return tuple(averages)

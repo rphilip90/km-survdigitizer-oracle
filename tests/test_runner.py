@@ -7,7 +7,7 @@ import json
 import unittest
 from unittest import mock
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from app.runner import DigitizerRunner
 from app.schemas import ImageManifest
@@ -65,6 +65,33 @@ class RunnerTests(unittest.TestCase):
 
         with Image.open(prepared_path) as prepared_image:
             self.assertEqual(prepared_image.size, (60, 64))
+
+    def test_prepare_image_masks_exclusion_regions(self) -> None:
+        runner = DigitizerRunner(self.settings)
+        masked_image_path = self.root / "masked-source.png"
+        image = Image.new("RGB", (100, 100), "white")
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((60, 0, 99, 20), fill="black")
+        image.save(masked_image_path)
+        masked_manifest = ImageManifest.model_validate(
+            {
+                **self.manifest.model_dump(),
+                "exclusion_regions": [
+                    {
+                        "left": 0.6,
+                        "top": 0.0,
+                        "right": 1.0,
+                        "bottom": 0.2,
+                        "label": "top summary",
+                    }
+                ]
+            }
+        )
+
+        prepared_path = runner.prepare_image("batch-1", masked_image_path, masked_manifest)
+
+        with Image.open(prepared_path) as prepared_image:
+            self.assertNotEqual(prepared_image.getpixel((80, 10)), (0, 0, 0))
 
     def test_runner_requires_meta_output(self) -> None:
         runner = DigitizerRunner(self.settings)

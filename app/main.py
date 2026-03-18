@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import csv
 import io
+import json
 import uuid
 import zipfile
 
@@ -199,6 +200,7 @@ async def save_review(
     crop_top: str = Form(default=""),
     crop_right: str = Form(default=""),
     crop_bottom: str = Form(default=""),
+    exclusion_regions_json: str = Form(default="[]"),
     crop_hint: str = Form(default=""),
     notes: str = Form(default=""),
     llm_confidence: float = Form(default=1.0),
@@ -228,6 +230,7 @@ async def save_review(
         crop_top=parse_optional_float(crop_top),
         crop_right=parse_optional_float(crop_right),
         crop_bottom=parse_optional_float(crop_bottom),
+        exclusion_regions=parse_exclusion_regions(exclusion_regions_json),
         crop_hint=crop_hint or None,
         notes=notes or None,
         llm_confidence=llm_confidence,
@@ -467,6 +470,16 @@ def parse_optional_float(value: str) -> float | None:
     if not stripped:
         return None
     return float(stripped)
+
+
+def parse_exclusion_regions(value: str) -> list[dict]:
+    stripped = value.strip()
+    if not stripped:
+        return []
+    parsed = json.loads(stripped)
+    if not isinstance(parsed, list):
+        raise ValueError("exclusion_regions_json must be a JSON array")
+    return parsed
 
 
 def build_export_archive(batch: dict) -> Path:

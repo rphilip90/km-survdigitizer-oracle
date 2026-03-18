@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import json
 import unittest
 from unittest import mock
 
@@ -107,6 +108,17 @@ class MainFlowTests(unittest.TestCase):
                     "crop_top": "0.20",
                     "crop_right": "0.90",
                     "crop_bottom": "0.82",
+                    "exclusion_regions_json": json.dumps(
+                        [
+                            {
+                                "left": 0.62,
+                                "top": 0.03,
+                                "right": 0.98,
+                                "bottom": 0.20,
+                                "label": "top summary",
+                            }
+                        ]
+                    ),
                     "crop_hint": "",
                     "notes": "preview-test",
                     "review_required": "on",
@@ -121,6 +133,7 @@ class MainFlowTests(unittest.TestCase):
         self.assertEqual(Path(image["review_overlay_path"]), review_overlay_path)
         self.assertAlmostEqual(image["manifest"]["crop_left"], 0.15)
         self.assertAlmostEqual(image["manifest"]["crop_bottom"], 0.82)
+        self.assertEqual(len(image["manifest"]["exclusion_regions"]), 1)
 
     def test_process_single_image_logs_review_pause(self) -> None:
         manifest = ImageManifest(

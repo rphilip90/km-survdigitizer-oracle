@@ -96,6 +96,7 @@ class ImageManifest(BaseModel):
     crop_top: float | None = None
     crop_right: float | None = None
     crop_bottom: float | None = None
+    exclusion_regions: list["ExclusionRegion"] = Field(default_factory=list)
     crop_hint: str | None = None
     notes: str | None = None
     llm_confidence: float = Field(ge=0, le=1)
@@ -163,3 +164,22 @@ class ImageManifest(BaseModel):
 
     def should_review(self, threshold: float) -> bool:
         return self.review_required or self.llm_confidence < threshold
+
+
+class ExclusionRegion(BaseModel):
+    left: float = Field(ge=0, le=1)
+    top: float = Field(ge=0, le=1)
+    right: float = Field(ge=0, le=1)
+    bottom: float = Field(ge=0, le=1)
+    label: str | None = None
+
+    @model_validator(mode="after")
+    def validate_bounds(self) -> "ExclusionRegion":
+        if self.right <= self.left:
+            raise ValueError("exclusion region right must be greater than left")
+        if self.bottom <= self.top:
+            raise ValueError("exclusion region bottom must be greater than top")
+        return self
+
+
+ImageManifest.model_rebuild()
