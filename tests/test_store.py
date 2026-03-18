@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from app.config import Settings
-from app.store import append_image_log, create_batch, create_image, get_image, init_db
+from app.store import append_image_log, create_batch, create_image, get_batch, get_image, init_db
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -55,6 +55,13 @@ class StoreLoggingTests(unittest.TestCase):
         self.assertEqual(len(image["processing_log"]), 2)
         self.assertEqual(image["latest_log"]["stage"], "processing_manifest")
         self.assertEqual(image["latest_log"]["message"], "Generating manifest.")
+
+    def test_batch_persists_auto_approve_threshold(self) -> None:
+        batch_id = create_batch(self.settings, "threshold-test", 1, auto_approve_threshold=0.91)
+
+        batch = get_batch(self.settings, batch_id)
+
+        self.assertEqual(batch["auto_approve_threshold"], 0.91)
 
 
 if __name__ == "__main__":

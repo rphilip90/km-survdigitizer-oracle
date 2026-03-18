@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from app import main
 from app.schemas import ImageManifest
-from app.store import create_batch, create_image, get_image, init_db, serialize_manifest, update_image
+from app.store import create_batch, create_image, get_image, init_db, serialize_manifest, update_batch, update_image
 from tests.test_store import make_settings
 
 
@@ -102,6 +102,33 @@ class MainFlowTests(unittest.TestCase):
         self.assertEqual(image["status"], "needs_review")
         stages = [entry["stage"] for entry in image["processing_log"]]
         self.assertEqual(stages, ["processing_manifest", "manifest_generated", "needs_review"])
+
+    def test_process_single_image_uses_batch_threshold(self) -> None:
+        update_batch(self.settings, self.batch_id, auto_approve_threshold=0.90)
+        manifest = ImageManifest(
+            image_id=self.image_id,
+            filename="test.png",
+            num_curves=2,
+            x_start=0,
+            x_end=60,
+            x_increment=10,
+            y_start=0,
+            y_end=100,
+            y_increment=25,
+            y_text_vertical=True,
+            rotation=0,
+            crop_hint=None,
+            notes="threshold-check",
+            llm_confidence=0.85,
+            review_required=False,
+        )
+
+        with mock.patch.object(main.manifest_service, "generate_manifest", return_value=manifest):
+            main.process_single_image(self.image_id, True)
+
+        image = get_image(self.settings, self.image_id)
+        self.assertEqual(image["status"], "needs_review")
+        self.assertIn("below the batch threshold of 0.90", image["error_message"])
 
     def test_process_single_image_logs_runner_failure(self) -> None:
         manifest = ImageManifest(

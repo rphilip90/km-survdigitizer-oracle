@@ -38,6 +38,7 @@ def init_db(settings: Settings) -> None:
                 id TEXT PRIMARY KEY,
                 label TEXT NOT NULL,
                 status TEXT NOT NULL,
+                auto_approve_threshold REAL,
                 image_count INTEGER NOT NULL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
@@ -67,6 +68,7 @@ def init_db(settings: Settings) -> None:
             CREATE INDEX IF NOT EXISTS idx_images_status ON images(status);
             """
         )
+        ensure_column(connection, "batches", "auto_approve_threshold", "REAL")
         ensure_column(connection, "images", "annotated_path", "TEXT")
         ensure_column(connection, "images", "output_log_path", "TEXT")
         ensure_column(connection, "images", "processing_log_json", "TEXT")
@@ -78,19 +80,41 @@ def row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
     return {key: row[key] for key in row.keys()}
 
 
-def create_batch(settings: Settings, label: str, image_count: int) -> str:
+def create_batch(
+    settings: Settings,
+    label: str,
+    image_count: int,
+    auto_approve_threshold: float | None = None,
+) -> str:
     batch_id = uuid.uuid4().hex
     now = utc_now()
+    threshold = auto_approve_threshold if auto_approve_threshold is not None else settings.auto_approve_threshold
     with connect(settings.db_path) as connection:
         connection.execute(
             """
-            INSERT INTO batches (id, label, status, image_count, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO batches (id, label, status, auto_approve_threshold, image_count, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (batch_id, label, "queued", image_count, now, now),
+            (batch_id, label, "queued", threshold, image_count, now, now),
         )
         connection.commit()
     return batch_id
+
+
+def update_batch(settings: Settings, batch_id: str, **fields: Any) -> None:
+    if not fields:
+        return
+
+    fields["updated_at"] = utc_now()
+    assignments = ", ".join(f"{key} = ?" for key in fields.keys())
+    values = list(fields.values()) + [batch_id]
+
+    with connect(settings.db_path) as connection:
+        connection.execute(
+            f"UPDATE batches SET {assignments} WHERE id = ?",
+            values,
+        )
+        connection.commit()
 
 
 def create_image(settings: Settings, batch_id: str, filename: str, original_path: str) -> str:
@@ -120,7 +144,11 @@ def list_batches(settings: Settings, limit: int = 20) -> list[dict[str, Any]]:
             """,
             (limit,),
         ).fetchall()
-    return [row_to_dict(row) for row in rows]
+    batches = [row_to_dict(row) for row in rows]
+    for batch in batches:
+        if batch.get("auto_approve_threshold") is None:
+            batch["auto_approve_threshold"] = settings.auto_approve_threshold
+    return batches
 
 
 def get_batch(settings: Settings, batch_id: str) -> dict[str, Any] | None:
@@ -140,6 +168,8 @@ def get_batch(settings: Settings, batch_id: str) -> dict[str, Any] | None:
             (batch_id,),
         ).fetchall()
     batch = row_to_dict(batch_row)
+    if batch.get("auto_approve_threshold") is None:
+        batch["auto_approve_threshold"] = settings.auto_approve_threshold
     batch["images"] = [deserialize_image_row(row_to_dict(row)) for row in image_rows]
     return batch
 

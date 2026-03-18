@@ -74,9 +74,11 @@ Return JSON with exactly these keys:
 - review_required
 
 Important rules:
-- x_increment and y_increment must include minor ticks if they are visibly present.
+- x_increment and y_increment must be plain JSON numbers only.
+- If minor ticks are visibly present, x_increment and y_increment must be the minor tick spacing itself.
+- Put any explanation about tick marks, uncertainty, units, or assumptions in notes, not in numeric fields.
 - y_text_vertical is true only if the y-axis labels are rotated vertically.
-- rotation must be one of 0, 90, 180, 270.
+- rotation must be one of 0, 90, 180, 270 and means the clockwise correction needed before digitization.
 - crop_hint should be null unless there is a strong reason to crop before digitization.
 - review_required must be true if any axis limit, increment, or curve count is uncertain.
 - llm_confidence must be a number between 0 and 1.

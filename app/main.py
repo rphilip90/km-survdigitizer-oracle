@@ -26,6 +26,7 @@ from .store import (
     list_batches,
     refresh_batch_status,
     serialize_manifest,
+    update_batch,
     update_image,
 )
 
@@ -54,6 +55,7 @@ def home(request: Request):
             "request": request,
             "batches": list_batches(settings),
             "app_title": settings.app_title,
+            "default_threshold": settings.auto_approve_threshold,
         },
     )
 
@@ -62,6 +64,7 @@ def home(request: Request):
 async def create_batch_route(
     request: Request,
     batch_label: str = Form(default=""),
+    auto_approve_threshold: float = Form(default=settings.auto_approve_threshold),
     zip_file: UploadFile | None = File(default=None),
     images: list[UploadFile] | None = File(default=None),
 ):
@@ -86,7 +89,12 @@ async def create_batch_route(
         raise HTTPException(status_code=400, detail="Upload a zip file or one or more image files.")
 
     label = label or f"Batch {uuid.uuid4().hex[:8]}"
-    batch_id = create_batch(settings, label=label, image_count=len(extracted_files))
+    batch_id = create_batch(
+        settings,
+        label=label,
+        image_count=len(extracted_files),
+        auto_approve_threshold=auto_approve_threshold,
+    )
     batch_dir = settings.upload_dir / batch_id / "original"
     batch_dir.mkdir(parents=True, exist_ok=True)
     seen_names: dict[str, int] = {}
@@ -113,9 +121,21 @@ def batch_detail(request: Request, batch_id: str):
         {
             "request": request,
             "batch": batch,
-            "threshold": settings.auto_approve_threshold,
         },
     )
+
+
+@app.post("/batches/{batch_id}/threshold")
+async def update_batch_threshold(
+    batch_id: str,
+    auto_approve_threshold: float = Form(...),
+):
+    batch = get_batch(settings, batch_id)
+    if not batch:
+        raise HTTPException(status_code=404, detail="Batch not found")
+
+    update_batch(settings, batch_id, auto_approve_threshold=auto_approve_threshold)
+    return RedirectResponse(url=f"/batches/{batch_id}", status_code=303)
 
 
 @app.get("/images/{image_id}")
@@ -290,6 +310,8 @@ def process_single_image(image_id: str, regenerate_manifest: bool) -> None:
     image = get_image(settings, image_id)
     if not image:
         return
+    batch = get_batch(settings, image["batch_id"])
+    threshold = batch.get("auto_approve_threshold", settings.auto_approve_threshold) if batch else settings.auto_approve_threshold
 
     try:
         if regenerate_manifest or not image.get("manifest"):
@@ -318,7 +340,7 @@ def process_single_image(image_id: str, regenerate_manifest: bool) -> None:
             append_image_log(settings, image_id, "manifest_loaded", "Using the saved reviewed manifest.")
 
         requires_review = (
-            manifest.should_review(settings.auto_approve_threshold)
+            manifest.should_review(threshold)
             if regenerate_manifest
             else manifest.review_required
         )
@@ -331,7 +353,7 @@ def process_single_image(image_id: str, regenerate_manifest: bool) -> None:
                 error_message=(
                     "Manifest needs review before digitization."
                     if manifest.review_required
-                    else f"Confidence {manifest.llm_confidence:.2f} is below auto-approve threshold."
+                    else f"Confidence {manifest.llm_confidence:.2f} is below the batch threshold of {threshold:.2f}."
                 ),
             )
             append_image_log(
