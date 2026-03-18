@@ -179,25 +179,58 @@ class MainFlowTests(unittest.TestCase):
         )
 
         prepared_path = self.root / "prepared.png"
+        annotated_path = self.root / "annotated.png"
         output_csv_path = self.root / "result.csv"
         output_meta_path = self.root / "result.meta.json"
         output_log_path = self.root / "result.log"
-        for path in [prepared_path, output_csv_path, output_meta_path, output_log_path]:
+        for path in [prepared_path, annotated_path, output_csv_path, output_meta_path, output_log_path]:
             path.write_text("ok", encoding="utf-8")
 
         with mock.patch.object(
             main.digitizer_runner,
             "run",
-            return_value=(prepared_path, output_csv_path, output_meta_path, output_log_path),
+            return_value=(prepared_path, output_csv_path, output_meta_path, output_log_path, annotated_path),
         ):
             main.process_single_image(self.image_id, False)
 
         image = get_image(self.settings, self.image_id)
         self.assertEqual(image["status"], "completed")
         self.assertIsNone(image["error_message"])
+        self.assertEqual(Path(image["annotated_path"]), annotated_path)
         self.assertEqual(Path(image["output_csv_path"]), output_csv_path)
         stages = [entry["stage"] for entry in image["processing_log"]]
         self.assertEqual(stages, ["manifest_loaded", "processing_digitizer", "completed"])
+
+    def test_export_batch_includes_annotated_overlay(self) -> None:
+        annotated_path = self.root / "annotated.png"
+        prepared_path = self.root / "prepared.png"
+        output_csv_path = self.root / "result.csv"
+        output_meta_path = self.root / "result.meta.json"
+        output_log_path = self.root / "result.log"
+        for path in [annotated_path, prepared_path, output_csv_path, output_meta_path, output_log_path]:
+            path.write_text("artifact", encoding="utf-8")
+
+        update_image(
+            self.settings,
+            self.image_id,
+            annotated_path=str(annotated_path),
+            prepared_path=str(prepared_path),
+            output_csv_path=str(output_csv_path),
+            output_meta_path=str(output_meta_path),
+            output_log_path=str(output_log_path),
+            status="completed",
+        )
+
+        batch = main.get_batch(self.settings, self.batch_id)
+        export_path = main.build_export_archive(batch)
+
+        import zipfile
+
+        with zipfile.ZipFile(export_path) as archive:
+            names = set(archive.namelist())
+
+        self.assertIn(f"annotated/{self.image_id}.png", names)
+        self.assertIn(f"prepared/{self.image_id}.png", names)
 
 
 if __name__ == "__main__":

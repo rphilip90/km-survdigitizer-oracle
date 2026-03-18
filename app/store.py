@@ -49,6 +49,7 @@ def init_db(settings: Settings) -> None:
                 filename TEXT NOT NULL,
                 original_path TEXT NOT NULL,
                 prepared_path TEXT,
+                annotated_path TEXT,
                 manifest_json TEXT,
                 llm_confidence REAL,
                 review_required INTEGER NOT NULL DEFAULT 0,
@@ -66,6 +67,7 @@ def init_db(settings: Settings) -> None:
             CREATE INDEX IF NOT EXISTS idx_images_status ON images(status);
             """
         )
+        ensure_column(connection, "images", "annotated_path", "TEXT")
         ensure_column(connection, "images", "output_log_path", "TEXT")
         ensure_column(connection, "images", "processing_log_json", "TEXT")
 

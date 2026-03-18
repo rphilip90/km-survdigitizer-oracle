@@ -39,12 +39,21 @@
     <div class="panel image-panel">
         <h2>Source Image</h2>
         <img src="/images/{{ image.id }}/raw" alt="{{ image.filename }}" class="image-preview">
-        {% if image.prepared_path or image.output_csv_path or image.output_meta_path or image.output_log_path %}
+        {% if image.annotated_path %}
+        <div class="artifact-list">
+            <h3>Digitized Overlay</h3>
+            <img src="/images/{{ image.id }}/artifact/annotated" alt="{{ image.filename }} digitized overlay" class="image-preview">
+        </div>
+        {% endif %}
+        {% if image.prepared_path or image.annotated_path or image.output_csv_path or image.output_meta_path or image.output_log_path %}
         <div class="artifact-list">
             <h3>Artifacts</h3>
             <div class="artifact-links">
                 {% if image.prepared_path %}
                 <a href="/images/{{ image.id }}/artifact/prepared" class="btn btn-small">Prepared Image</a>
+                {% endif %}
+                {% if image.annotated_path %}
+                <a href="/images/{{ image.id }}/artifact/annotated" class="btn btn-small">Annotated Overlay</a>
                 {% endif %}
                 {% if image.output_csv_path %}
                 <a href="/images/{{ image.id }}/artifact/csv" class="btn btn-small">CSV Output</a>

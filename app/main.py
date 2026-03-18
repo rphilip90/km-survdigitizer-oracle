@@ -150,6 +150,7 @@ def image_artifact(image_id: str, kind: str):
 
     artifact_map = {
         "prepared": image.get("prepared_path"),
+        "annotated": image.get("annotated_path"),
         "csv": image.get("output_csv_path"),
         "meta": image.get("output_meta_path"),
         "log": image.get("output_log_path"),
@@ -344,7 +345,7 @@ def process_single_image(image_id: str, regenerate_manifest: bool) -> None:
 
         append_image_log(settings, image_id, "processing_digitizer", "Running SurvdigitizeR extraction.")
         update_image(settings, image_id, status="processing_digitizer", error_message=None)
-        prepared_path, output_csv_path, output_meta_path, output_log_path = digitizer_runner.run(
+        prepared_path, output_csv_path, output_meta_path, output_log_path, annotated_path = digitizer_runner.run(
             batch_id=image["batch_id"],
             image_id=image["id"],
             image_path=Path(image["original_path"]),
@@ -354,6 +355,7 @@ def process_single_image(image_id: str, regenerate_manifest: bool) -> None:
             settings,
             image_id,
             prepared_path=str(prepared_path),
+            annotated_path=str(annotated_path),
             output_csv_path=str(output_csv_path),
             output_meta_path=str(output_meta_path),
             output_log_path=str(output_log_path),
@@ -404,6 +406,10 @@ def build_export_archive(batch: dict) -> Path:
                 archive.writestr(f"manifests/{image['id']}.json", image["manifest_json"])
             if image.get("original_path") and Path(image["original_path"]).exists():
                 archive.write(image["original_path"], arcname=f"images/{image['filename']}")
+            if image.get("prepared_path") and Path(image["prepared_path"]).exists():
+                archive.write(image["prepared_path"], arcname=f"prepared/{image['id']}{Path(image['prepared_path']).suffix}")
+            if image.get("annotated_path") and Path(image["annotated_path"]).exists():
+                archive.write(image["annotated_path"], arcname=f"annotated/{image['id']}.png")
             if image.get("output_csv_path") and Path(image["output_csv_path"]).exists():
                 archive.write(image["output_csv_path"], arcname=f"results/{image['id']}.csv")
             if image.get("output_meta_path") and Path(image["output_meta_path"]).exists():
