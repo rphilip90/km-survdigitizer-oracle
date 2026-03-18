@@ -335,8 +335,8 @@ if (!is.data.frame(result) || nrow(result) == 0) {
 overlay_curves <- lapply(step6, function(curve_df) {
   data.frame(
     curve = as.integer(curve_df$curve),
-    x = as.integer(step2$axes$xaxis[curve_df$x]),
-    y = as.integer(step2$axes$yaxis[curve_df$y])
+    x = as.integer(step2$axes$xaxis[curve_df$x] - 1),
+    y = as.integer(dim(step1)[1] - step2$axes$yaxis[curve_df$y])
   )
 })
 
