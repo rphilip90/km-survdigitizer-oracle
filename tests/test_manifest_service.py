@@ -77,6 +77,35 @@ class ManifestParsingTests(unittest.TestCase):
         self.assertAlmostEqual(manifest.llm_confidence, 0.87)
         self.assertTrue(manifest.y_text_vertical)
 
+    def test_manifest_accepts_normalized_crop_bounds(self) -> None:
+        manifest = ImageManifest.model_validate(
+            {
+                "image_id": "1",
+                "filename": "plot.png",
+                "num_curves": 2,
+                "x_start": 0,
+                "x_end": 30,
+                "x_increment": 5,
+                "y_start": 0,
+                "y_end": 100,
+                "y_increment": 20,
+                "y_text_vertical": "true",
+                "rotation": "0",
+                "crop_left": "0.10",
+                "crop_top": "0.20",
+                "crop_right": "0.90",
+                "crop_bottom": "0.80",
+                "crop_hint": "exclude risk table",
+                "notes": None,
+                "llm_confidence": 0.7,
+                "review_required": "true",
+            }
+        )
+
+        self.assertAlmostEqual(manifest.crop_left, 0.10)
+        self.assertAlmostEqual(manifest.crop_bottom, 0.80)
+        self.assertEqual(manifest.crop_hint, "exclude risk table")
+
 
 if __name__ == "__main__":
     unittest.main()

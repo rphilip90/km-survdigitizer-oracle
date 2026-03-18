@@ -39,13 +39,38 @@ class DigitizerRunner:
         prepared_path = prepared_dir / f"{image_path.stem}-{uuid.uuid4().hex}{image_path.suffix}"
 
         rotation = manifest.rotation or 0
-        if rotation == 0:
+        has_crop = all(
+            value is not None
+            for value in [manifest.crop_left, manifest.crop_top, manifest.crop_right, manifest.crop_bottom]
+        )
+        if rotation == 0 and not has_crop:
             shutil.copy2(image_path, prepared_path)
             return prepared_path
 
         with Image.open(image_path) as image:
-            rotated = image.rotate(-rotation, expand=True)
-            rotated.save(prepared_path)
+            working_image = image.copy()
+
+            if has_crop:
+                width, height = working_image.size
+                left = int(width * manifest.crop_left)
+                top = int(height * manifest.crop_top)
+                right = int(width * manifest.crop_right)
+                bottom = int(height * manifest.crop_bottom)
+
+                left = max(0, min(left, width - 1))
+                top = max(0, min(top, height - 1))
+                right = max(left + 1, min(right, width))
+                bottom = max(top + 1, min(bottom, height))
+
+                if right - left < 20 or bottom - top < 20:
+                    raise RuntimeError("The requested crop bounds are too small to isolate a usable plot panel.")
+
+                working_image = working_image.crop((left, top, right, bottom))
+
+            if rotation != 0:
+                working_image = working_image.rotate(-rotation, expand=True)
+
+            working_image.save(prepared_path)
         return prepared_path
 
     def run(self, batch_id: str, image_id: str, image_path: Path, manifest: ImageManifest) -> tuple[Path, Path, Path, Path, Path]:

@@ -135,11 +135,28 @@
                         <option value="true" {% if y_vertical %}selected{% endif %}>True</option>
                     </select>
                 </label>
+                <label>
+                    <span>Crop Left</span>
+                    <input type="number" name="crop_left" min="0" max="1" step="0.001" value="{{ manifest.crop_left if manifest and manifest.crop_left is not none else '' }}">
+                </label>
+                <label>
+                    <span>Crop Top</span>
+                    <input type="number" name="crop_top" min="0" max="1" step="0.001" value="{{ manifest.crop_top if manifest and manifest.crop_top is not none else '' }}">
+                </label>
+                <label>
+                    <span>Crop Right</span>
+                    <input type="number" name="crop_right" min="0" max="1" step="0.001" value="{{ manifest.crop_right if manifest and manifest.crop_right is not none else '' }}">
+                </label>
+                <label>
+                    <span>Crop Bottom</span>
+                    <input type="number" name="crop_bottom" min="0" max="1" step="0.001" value="{{ manifest.crop_bottom if manifest and manifest.crop_bottom is not none else '' }}">
+                </label>
             </div>
             <label>
                 <span>Crop Hint</span>
-                <input type="text" name="crop_hint" value="{{ manifest.crop_hint if manifest and manifest.crop_hint else '' }}" placeholder="Optional note only in v1">
+                <input type="text" name="crop_hint" value="{{ manifest.crop_hint if manifest and manifest.crop_hint else '' }}" placeholder="Example: exclude risk table and top summary">
             </label>
+            <p class="panel-hint">Crop bounds are normalized to the full source image: 0 is the top or left edge, 1 is the bottom or right edge.</p>
             <label>
                 <span>Notes</span>
                 <textarea name="notes" rows="4" placeholder="Reasons for review or manual changes">{{ manifest.notes if manifest and manifest.notes else '' }}</textarea>

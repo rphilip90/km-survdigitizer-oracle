@@ -195,6 +195,10 @@ async def save_review(
     y_increment: float = Form(...),
     y_text_vertical: str = Form(default="false"),
     rotation: int = Form(default=0),
+    crop_left: str = Form(default=""),
+    crop_top: str = Form(default=""),
+    crop_right: str = Form(default=""),
+    crop_bottom: str = Form(default=""),
     crop_hint: str = Form(default=""),
     notes: str = Form(default=""),
     llm_confidence: float = Form(default=1.0),
@@ -220,6 +224,10 @@ async def save_review(
         y_increment=y_increment,
         y_text_vertical=y_text_vertical.lower() == "true",
         rotation=rotation,
+        crop_left=parse_optional_float(crop_left),
+        crop_top=parse_optional_float(crop_top),
+        crop_right=parse_optional_float(crop_right),
+        crop_bottom=parse_optional_float(crop_bottom),
         crop_hint=crop_hint or None,
         notes=notes or None,
         llm_confidence=llm_confidence,
@@ -452,6 +460,13 @@ def ensure_review_preview(image: dict, manifest: ImageManifest) -> tuple[dict[st
         return {
             "review_overlay_path": None,
         }, str(error)
+
+
+def parse_optional_float(value: str) -> float | None:
+    stripped = value.strip()
+    if not stripped:
+        return None
+    return float(stripped)
 
 
 def build_export_archive(batch: dict) -> Path:

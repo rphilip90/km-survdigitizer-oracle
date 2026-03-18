@@ -48,6 +48,24 @@ class RunnerTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "CSV output"):
                 runner.run("batch-1", "image-1", self.image_path, self.manifest)
 
+    def test_prepare_image_applies_crop_bounds(self) -> None:
+        runner = DigitizerRunner(self.settings)
+        large_image_path = self.root / "large-source.png"
+        Image.new("RGB", (120, 80), "white").save(large_image_path)
+        cropped_manifest = self.manifest.model_copy(
+            update={
+                "crop_left": 0.25,
+                "crop_top": 0.10,
+                "crop_right": 0.75,
+                "crop_bottom": 0.90,
+            }
+        )
+
+        prepared_path = runner.prepare_image("batch-1", large_image_path, cropped_manifest)
+
+        with Image.open(prepared_path) as prepared_image:
+            self.assertEqual(prepared_image.size, (60, 64))
+
     def test_runner_requires_meta_output(self) -> None:
         runner = DigitizerRunner(self.settings)
 

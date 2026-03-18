@@ -103,6 +103,10 @@ class MainFlowTests(unittest.TestCase):
                     "y_increment": 25,
                     "y_text_vertical": "true",
                     "rotation": 0,
+                    "crop_left": "0.15",
+                    "crop_top": "0.20",
+                    "crop_right": "0.90",
+                    "crop_bottom": "0.82",
                     "crop_hint": "",
                     "notes": "preview-test",
                     "review_required": "on",
@@ -115,6 +119,8 @@ class MainFlowTests(unittest.TestCase):
         self.assertTrue(image["review_required"])
         self.assertEqual(image["status"], "needs_review")
         self.assertEqual(Path(image["review_overlay_path"]), review_overlay_path)
+        self.assertAlmostEqual(image["manifest"]["crop_left"], 0.15)
+        self.assertAlmostEqual(image["manifest"]["crop_bottom"], 0.82)
 
     def test_process_single_image_logs_review_pause(self) -> None:
         manifest = ImageManifest(

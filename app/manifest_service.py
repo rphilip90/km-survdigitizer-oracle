@@ -68,19 +68,27 @@ Return JSON with exactly these keys:
 - y_increment
 - y_text_vertical
 - rotation
+- crop_left
+- crop_top
+- crop_right
+- crop_bottom
 - crop_hint
 - notes
 - llm_confidence
 - review_required
 
 Important rules:
+- Identify the actual plotting panel only. Exclude number-at-risk tables, top summary tables, captions, keywords, and any decorative page content outside the axes.
+- If a risk table or summary block is outside the main plot area, return crop_left, crop_top, crop_right, and crop_bottom as normalized numbers between 0 and 1 that isolate the plot panel before digitization.
+- If the full image is already just the plotting panel, set crop_left, crop_top, crop_right, and crop_bottom to null.
 - x_increment and y_increment must be plain JSON numbers only.
 - If minor ticks are visibly present, x_increment and y_increment must be the minor tick spacing itself.
 - Put any explanation about tick marks, uncertainty, units, or assumptions in notes, not in numeric fields.
 - y_text_vertical is true only if the y-axis labels are rotated vertically.
 - rotation must be one of 0, 90, 180, 270 and means the clockwise correction needed before digitization.
-- crop_hint should be null unless there is a strong reason to crop before digitization.
+- crop_hint should briefly explain what was excluded, for example "exclude risk table and top summary"; otherwise null.
 - review_required must be true if any axis limit, increment, or curve count is uncertain.
+- review_required must be true if the plot panel bounds are uncertain.
 - llm_confidence must be a number between 0 and 1.
 - Do not include markdown, prose, or extra keys.
 

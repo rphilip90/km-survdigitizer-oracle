@@ -18,10 +18,15 @@ FLOAT_FIELDS = {
     "y_end",
     "y_increment",
     "llm_confidence",
+    "crop_left",
+    "crop_top",
+    "crop_right",
+    "crop_bottom",
 }
 INTEGER_FIELDS = {"num_curves", "rotation"}
 BOOLEAN_FIELDS = {"y_text_vertical", "review_required"}
 INCREMENT_FIELDS = {"x_increment", "y_increment"}
+OPTIONAL_FLOAT_FIELDS = {"crop_left", "crop_top", "crop_right", "crop_bottom"}
 
 
 def extract_numbers(value: str) -> list[float]:
@@ -87,6 +92,10 @@ class ImageManifest(BaseModel):
     y_increment: float = Field(gt=0)
     y_text_vertical: bool
     rotation: int | None = 0
+    crop_left: float | None = None
+    crop_top: float | None = None
+    crop_right: float | None = None
+    crop_bottom: float | None = None
     crop_hint: str | None = None
     notes: str | None = None
     llm_confidence: float = Field(ge=0, le=1)
@@ -107,6 +116,9 @@ class ImageManifest(BaseModel):
 
         for field_name in FLOAT_FIELDS | INTEGER_FIELDS:
             if field_name not in payload:
+                continue
+            if field_name in OPTIONAL_FLOAT_FIELDS and isinstance(payload[field_name], str) and not payload[field_name].strip():
+                payload[field_name] = None
                 continue
             normalized, note, ambiguous = normalize_numeric_value(field_name, payload[field_name])
             payload[field_name] = normalized
@@ -136,6 +148,17 @@ class ImageManifest(BaseModel):
             raise ValueError("y_end must be greater than y_start")
         if self.rotation not in (None, 0, 90, 180, 270):
             raise ValueError("rotation must be one of 0, 90, 180, 270")
+        crop_values = [self.crop_left, self.crop_top, self.crop_right, self.crop_bottom]
+        defined_crops = [value for value in crop_values if value is not None]
+        if defined_crops and len(defined_crops) != 4:
+            raise ValueError("crop_left, crop_top, crop_right, and crop_bottom must all be provided together")
+        for value in defined_crops:
+            if not 0 <= value <= 1:
+                raise ValueError("crop bounds must be between 0 and 1")
+        if self.crop_right is not None and self.crop_left is not None and self.crop_right <= self.crop_left:
+            raise ValueError("crop_right must be greater than crop_left")
+        if self.crop_bottom is not None and self.crop_top is not None and self.crop_bottom <= self.crop_top:
+            raise ValueError("crop_bottom must be greater than crop_top")
         return self
 
     def should_review(self, threshold: float) -> bool:
