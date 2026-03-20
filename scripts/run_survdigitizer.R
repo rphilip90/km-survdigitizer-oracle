@@ -549,6 +549,13 @@ overlay_curves <- lapply(step6, function(curve_df) {
 })
 
 overlay_points <- dplyr::bind_rows(overlay_curves)
+overlay_points <- overlay_points |>
+  dplyr::filter(!is.na(curve), !is.na(x), !is.na(y))
+
+if (nrow(overlay_points) == 0) {
+  stop("Extraction finished but the overlay points could not be mapped back onto the prepared image.", call. = FALSE)
+}
+
 curve_point_counts <- overlay_points |>
   dplyr::group_by(curve) |>
   dplyr::summarise(point_count = dplyr::n(), .groups = "drop")

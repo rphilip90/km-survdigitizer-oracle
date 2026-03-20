@@ -172,6 +172,35 @@ class RunnerTests(unittest.TestCase):
 
         self.assertTrue(output_annotated_path.exists())
 
+    def test_render_digitized_overlay_skips_invalid_points(self) -> None:
+        runner = DigitizerRunner(self.settings)
+        prepared_path = self.root / "prepared-invalid.png"
+        output_annotated_path = self.root / "annotated-invalid.png"
+        overlay_points_path = self.root / "overlay-invalid.json"
+        Image.new("RGB", (40, 30), "white").save(prepared_path)
+        overlay_points_path.write_text(
+            json.dumps(
+                {
+                    "curves": [
+                        {
+                            "curve": 1,
+                            "points": [
+                                {"x": 5, "y": 5},
+                                {"x": "NA", "y": 10},
+                                {"x": 20, "y": "NA"},
+                                {"x": 30, "y": 14},
+                            ],
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        runner.render_digitized_overlay(prepared_path, overlay_points_path, output_annotated_path)
+
+        self.assertTrue(output_annotated_path.exists())
+
     def test_render_review_overlay_writes_png(self) -> None:
         runner = DigitizerRunner(self.settings)
         prepared_path = self.root / "review-prepared.png"

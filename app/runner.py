@@ -326,13 +326,16 @@ class DigitizerRunner:
             if not points:
                 continue
 
-            line_points = [
-                (
-                    max(0, min(int(point["x"]), width - 1)),
-                    max(0, min(int(point["y"]), height - 1)),
-                )
-                for point in points
-            ]
+            line_points = []
+            for point in points:
+                x_coord = self._safe_overlay_coordinate(point.get("x"), width - 1)
+                y_coord = self._safe_overlay_coordinate(point.get("y"), height - 1)
+                if x_coord is None or y_coord is None:
+                    continue
+                line_points.append((x_coord, y_coord))
+
+            if not line_points:
+                continue
 
             if len(line_points) >= 2:
                 draw.line(line_points, fill=color, width=2)
@@ -512,6 +515,18 @@ class DigitizerRunner:
     @staticmethod
     def _clamp(value: float, minimum: float, maximum: float) -> float:
         return max(minimum, min(value, maximum))
+
+    @staticmethod
+    def _safe_overlay_coordinate(value: object, maximum: int) -> int | None:
+        if value in (None, "", "NA", "NaN", "nan"):
+            return None
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            return None
+        if math.isnan(numeric_value) or math.isinf(numeric_value):
+            return None
+        return max(0, min(int(round(numeric_value)), maximum))
 
     @staticmethod
     def _estimate_background_fill(image: Image.Image) -> tuple[int, ...]:
