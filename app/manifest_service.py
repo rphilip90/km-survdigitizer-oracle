@@ -80,11 +80,15 @@ Return JSON with exactly these keys:
 
 Important rules:
 - Identify the actual plotting panel only. Exclude number-at-risk tables, top summary tables, captions, keywords, and any decorative page content outside the axes.
+- Preserve the full x-axis line, y-axis line, all visible major and minor tick marks, and all axis labels required to reconstruct the plot scale.
+- Do not return a crop that cuts off the right edge of the x-axis, the base of the y-axis, or the label zones around those axes.
 - crop_left, crop_top, crop_right, and crop_bottom must keep the full x-axis, full y-axis, all visible tick marks, and all axis labels needed for digitization. Do not crop into the axes.
 - If the figure contains non-plot blocks such as a risk table, hazard-ratio table, top summary block, or caption that intrude into the crop rectangle, use exclusion_regions to mask them while preserving the full axes.
+- Exclusion masks should go around risk tables or summary blocks instead of replacing the entire plot crop. Use as many exclusion_regions as needed to preserve the whole axis envelope.
 - exclusion_regions must be a JSON array of objects. Each object must have left, top, right, bottom as normalized numbers between 0 and 1 plus an optional label. Return [] when no masking is needed.
 - Prefer a generous crop plus one or more exclusion_regions over an aggressive crop that cuts off axes or tick labels.
 - If the full image is already just the plotting panel, set crop_left, crop_top, crop_right, and crop_bottom to null.
+- If the plot layout is complex or you are not confident that the crop and masks preserve the full axes, set review_required to true.
 - x_increment and y_increment must be plain JSON numbers only.
 - If minor ticks are visibly present, x_increment and y_increment must be the minor tick spacing itself.
 - Put any explanation about tick marks, uncertainty, units, or assumptions in notes, not in numeric fields.

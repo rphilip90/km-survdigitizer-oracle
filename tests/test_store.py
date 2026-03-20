@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from app.config import Settings
-from app.store import append_image_log, create_batch, create_image, get_batch, get_image, init_db
+from app.store import append_image_log, create_batch, create_image, get_batch, get_image, init_db, serialize_preflight, update_image
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -62,6 +62,31 @@ class StoreLoggingTests(unittest.TestCase):
         batch = get_batch(self.settings, batch_id)
 
         self.assertEqual(batch["auto_approve_threshold"], 0.91)
+
+    def test_image_persists_preflight_report(self) -> None:
+        batch_id = create_batch(self.settings, "preflight-test", 1)
+        image_path = self.settings.upload_dir / "image.png"
+        image_path.parent.mkdir(parents=True, exist_ok=True)
+        image_path.write_bytes(b"test")
+        image_id = create_image(self.settings, batch_id, "image.png", str(image_path))
+
+        update_image(
+            self.settings,
+            image_id,
+            preflight_json=serialize_preflight(
+                {
+                    "blocking": True,
+                    "checks": [{"id": "axis-plot-size", "status": "fail"}],
+                    "warnings": ["collapsed axis"],
+                    "metrics": {"plot_width": 2},
+                }
+            ),
+        )
+
+        image = get_image(self.settings, image_id)
+
+        self.assertTrue(image["preflight_report"]["blocking"])
+        self.assertEqual(image["preflight_report"]["metrics"]["plot_width"], 2)
 
 
 if __name__ == "__main__":

@@ -53,6 +53,7 @@ def init_db(settings: Settings) -> None:
                 review_overlay_path TEXT,
                 annotated_path TEXT,
                 manifest_json TEXT,
+                preflight_json TEXT,
                 llm_confidence REAL,
                 review_required INTEGER NOT NULL DEFAULT 0,
                 status TEXT NOT NULL,
@@ -74,6 +75,7 @@ def init_db(settings: Settings) -> None:
         ensure_column(connection, "images", "review_overlay_path", "TEXT")
         ensure_column(connection, "images", "output_log_path", "TEXT")
         ensure_column(connection, "images", "processing_log_json", "TEXT")
+        ensure_column(connection, "images", "preflight_json", "TEXT")
 
 
 def row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -241,6 +243,12 @@ def serialize_manifest(manifest: dict[str, Any] | None) -> str | None:
     return json.dumps(manifest, indent=2)
 
 
+def serialize_preflight(report: dict[str, Any] | None) -> str | None:
+    if report is None:
+        return None
+    return json.dumps(report, indent=2)
+
+
 def append_image_log(
     settings: Settings,
     image_id: str,
@@ -294,6 +302,10 @@ def deserialize_image_row(image: dict[str, Any] | None) -> dict[str, Any] | None
         image["manifest"] = json.loads(image["manifest_json"])
     else:
         image["manifest"] = None
+    if image.get("preflight_json"):
+        image["preflight_report"] = json.loads(image["preflight_json"])
+    else:
+        image["preflight_report"] = None
     if image.get("processing_log_json"):
         image["processing_log"] = json.loads(image["processing_log_json"])
     else:

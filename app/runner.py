@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 import json
 import math
@@ -27,6 +28,16 @@ REVIEW_AXIS_COLOR = (255, 165, 0, 210)
 REVIEW_TICK_COLOR = (255, 0, 102, 220)
 REVIEW_LABEL_BG = (255, 255, 255, 200)
 REVIEW_LABEL_TEXT = (15, 23, 42, 255)
+REVIEW_MASK_FILL = (239, 68, 68, 70)
+REVIEW_MASK_OUTLINE = (220, 38, 38, 180)
+
+
+@dataclass(frozen=True)
+class PreflightArtifacts:
+    prepared_path: Path
+    review_overlay_path: Path
+    preview_payload: dict
+    output_log_path: Path
 
 
 class DigitizerRunner:
@@ -84,7 +95,14 @@ class DigitizerRunner:
             working_image.save(prepared_path)
         return prepared_path
 
-    def run(self, batch_id: str, image_id: str, image_path: Path, manifest: ImageManifest) -> tuple[Path, Path, Path, Path, Path]:
+    def run(
+        self,
+        batch_id: str,
+        image_id: str,
+        image_path: Path,
+        manifest: ImageManifest,
+        prepared_path: Path | None = None,
+    ) -> tuple[Path, Path, Path, Path, Path]:
         batch_manifest_dir = self.settings.manifest_dir / batch_id
         batch_result_dir = self.settings.result_dir / batch_id
         batch_log_dir = self.settings.log_dir / batch_id
@@ -92,7 +110,7 @@ class DigitizerRunner:
         batch_result_dir.mkdir(parents=True, exist_ok=True)
         batch_log_dir.mkdir(parents=True, exist_ok=True)
 
-        prepared_path = self.prepare_image(batch_id=batch_id, image_path=image_path, manifest=manifest)
+        prepared_path = prepared_path or self.prepare_image(batch_id=batch_id, image_path=image_path, manifest=manifest)
         manifest_path = batch_manifest_dir / f"{image_id}.json"
         output_csv_path = batch_result_dir / f"{image_id}.csv"
         output_meta_path = batch_result_dir / f"{image_id}.meta.json"
@@ -126,23 +144,16 @@ class DigitizerRunner:
             check=False,
         )
 
-        output_log_path.write_text(
-            "\n".join(
-                [
-                    f"Command: {self.settings.rscript_bin} --vanilla {self.settings.runner_script}",
-                    f"Prepared image: {prepared_path}",
-                    f"Overlay points JSON: {output_overlay_points_path}",
-                    f"Annotated overlay image: {output_annotated_path}",
-                    "",
-                    "STDOUT:",
-                    result.stdout or "",
-                    "",
-                    "STDERR:",
-                    result.stderr or "",
-                ]
-            ).strip()
-            + "\n",
-            encoding="utf-8",
+        self._write_runner_log(
+            output_log_path=output_log_path,
+            lines=[
+                f"Command: {self.settings.rscript_bin} --vanilla {self.settings.runner_script}",
+                f"Prepared image: {prepared_path}",
+                f"Overlay points JSON: {output_overlay_points_path}",
+                f"Annotated overlay image: {output_annotated_path}",
+            ],
+            stdout=result.stdout,
+            stderr=result.stderr,
         )
 
         if result.returncode != 0:
@@ -169,22 +180,25 @@ class DigitizerRunner:
 
         return prepared_path, output_csv_path, output_meta_path, output_log_path, output_annotated_path
 
-    def build_review_preview(
+    def run_preflight(
         self,
         batch_id: str,
         image_id: str,
         image_path: Path,
         manifest: ImageManifest,
-    ) -> tuple[Path, Path]:
+    ) -> PreflightArtifacts:
         batch_manifest_dir = self.settings.manifest_dir / batch_id
         batch_result_dir = self.settings.result_dir / batch_id
+        batch_log_dir = self.settings.log_dir / batch_id
         batch_manifest_dir.mkdir(parents=True, exist_ok=True)
         batch_result_dir.mkdir(parents=True, exist_ok=True)
+        batch_log_dir.mkdir(parents=True, exist_ok=True)
 
         prepared_path = self.prepare_image(batch_id=batch_id, image_path=image_path, manifest=manifest)
         manifest_path = batch_manifest_dir / f"{image_id}.json"
-        review_preview_path = batch_result_dir / f"{image_id}.review.json"
+        review_preview_path = batch_result_dir / f"{image_id}.preflight.json"
         review_overlay_path = batch_result_dir / f"{image_id}.review.png"
+        output_log_path = batch_log_dir / f"{image_id}.preflight.log"
 
         manifest_path.write_text(
             manifest.model_dump_json(indent=2),
@@ -202,31 +216,51 @@ class DigitizerRunner:
                 str(manifest_path),
                 "--output-review-json",
                 str(review_preview_path),
-                "--preview-only",
+                "--preflight-only",
             ],
             capture_output=True,
             text=True,
             check=False,
         )
 
+        self._write_runner_log(
+            output_log_path=output_log_path,
+            lines=[
+                f"Command: {self.settings.rscript_bin} --vanilla {self.settings.runner_script}",
+                f"Prepared image: {prepared_path}",
+                f"Preflight JSON: {review_preview_path}",
+                f"Review overlay image: {review_overlay_path}",
+            ],
+            stdout=result.stdout,
+            stderr=result.stderr,
+        )
+
         if result.returncode != 0:
-            message = (result.stderr or result.stdout or "Review preview generation failed").strip()
+            message = (result.stderr or result.stdout or "Preflight generation failed").strip()
             raise RuntimeError(message)
 
         if not review_preview_path.exists():
-            raise RuntimeError("Review preview generation finished without writing preview metadata.")
+            raise RuntimeError("Preflight generation finished without writing preview metadata.")
+
+        preview_payload = json.loads(review_preview_path.read_text(encoding="utf-8"))
 
         self.render_review_overlay(
             prepared_path=prepared_path,
             review_preview_path=review_preview_path,
             output_review_overlay_path=review_overlay_path,
             manifest=manifest,
+            source_size=self._read_image_size(image_path),
         )
 
         if not review_overlay_path.exists():
             raise RuntimeError("Review preview generation finished without writing the review grid image.")
 
-        return prepared_path, review_overlay_path
+        return PreflightArtifacts(
+            prepared_path=prepared_path,
+            review_overlay_path=review_overlay_path,
+            preview_payload=preview_payload,
+            output_log_path=output_log_path,
+        )
 
     def render_digitized_overlay(
         self,
@@ -280,6 +314,7 @@ class DigitizerRunner:
         review_preview_path: Path,
         output_review_overlay_path: Path,
         manifest: ImageManifest,
+        source_size: tuple[int, int] | None = None,
     ) -> Path:
         preview_payload = json.loads(review_preview_path.read_text(encoding="utf-8"))
 
@@ -289,31 +324,52 @@ class DigitizerRunner:
         draw = ImageDraw.Draw(canvas, "RGBA")
         font = ImageFont.load_default()
         width, height = canvas.size
+        source_width, source_height = source_size or (
+            int(preview_payload.get("source_width") or width),
+            int(preview_payload.get("source_height") or height),
+        )
 
         plot = preview_payload.get("plot_bounds") or {}
-        left = self._clamp(float(plot.get("left", 0)), 0, width - 1)
-        right = self._clamp(float(plot.get("right", width - 1)), 0, width - 1)
-        top = self._clamp(float(plot.get("top", 0)), 0, height - 1)
-        bottom = self._clamp(float(plot.get("bottom", height - 1)), 0, height - 1)
+        left = self._clamp(float(plot.get("left", 0)), 0, width - 1) if plot else 0
+        right = self._clamp(float(plot.get("right", width - 1)), 0, width - 1) if plot else width - 1
+        top = self._clamp(float(plot.get("top", 0)), 0, height - 1) if plot else 0
+        bottom = self._clamp(float(plot.get("bottom", height - 1)), 0, height - 1) if plot else height - 1
 
-        if right <= left or bottom <= top:
-            raise RuntimeError("Review preview metadata did not contain usable plot bounds.")
+        exclusion_boxes = self._project_exclusion_regions(
+            manifest=manifest,
+            source_width=source_width,
+            source_height=source_height,
+            prepared_width=width,
+            prepared_height=height,
+        )
+        for box in exclusion_boxes:
+            draw.rectangle(box["bounds"], fill=REVIEW_MASK_FILL, outline=REVIEW_MASK_OUTLINE, width=2)
 
-        tick_values_x = self._generate_tick_values(manifest.x_start, manifest.x_end, manifest.x_increment)
-        tick_values_y = self._generate_tick_values(manifest.y_start, manifest.y_end, manifest.y_increment)
+        if plot and right > left and bottom > top:
+            tick_values_x = self._generate_tick_values(manifest.x_start, manifest.x_end, manifest.x_increment)
+            tick_values_y = self._generate_tick_values(manifest.y_start, manifest.y_end, manifest.y_increment)
 
-        for tick_value in tick_values_x:
-            position = self._axis_position(tick_value, manifest.x_start, manifest.x_end, left, right)
-            draw.line((position, top, position, bottom), fill=REVIEW_GRID_COLOR, width=1)
-            draw.line((position, bottom, position, min(height - 1, bottom + 8)), fill=REVIEW_TICK_COLOR, width=2)
+            for tick_value in tick_values_x:
+                position = self._axis_position(tick_value, manifest.x_start, manifest.x_end, left, right)
+                draw.line((position, top, position, bottom), fill=REVIEW_GRID_COLOR, width=1)
+                draw.line((position, bottom, position, min(height - 1, bottom + 8)), fill=REVIEW_TICK_COLOR, width=2)
 
-        for tick_value in tick_values_y:
-            position = self._axis_position(tick_value, manifest.y_start, manifest.y_end, bottom, top)
-            draw.line((left, position, right, position), fill=REVIEW_GRID_COLOR, width=1)
-            draw.line((max(0, left - 8), position, left, position), fill=REVIEW_TICK_COLOR, width=2)
+            for tick_value in tick_values_y:
+                position = self._axis_position(tick_value, manifest.y_start, manifest.y_end, bottom, top)
+                draw.line((left, position, right, position), fill=REVIEW_GRID_COLOR, width=1)
+                draw.line((max(0, left - 8), position, left, position), fill=REVIEW_TICK_COLOR, width=2)
 
-        draw.rectangle((left, top, right, bottom), outline=REVIEW_AXIS_COLOR, width=2)
-        self._draw_preview_badges(draw, font, left, top, manifest)
+            draw.rectangle((left, top, right, bottom), outline=REVIEW_AXIS_COLOR, width=2)
+
+        self._draw_preview_badges(
+            draw,
+            font,
+            left,
+            top,
+            manifest,
+            preview_payload.get("stage_errors") or [],
+            exclusion_boxes,
+        )
 
         output_review_overlay_path.parent.mkdir(parents=True, exist_ok=True)
         canvas.save(output_review_overlay_path)
@@ -326,13 +382,17 @@ class DigitizerRunner:
         left: float,
         top: float,
         manifest: ImageManifest,
+        stage_errors: list[dict],
+        exclusion_boxes: list[dict],
     ) -> None:
         labels = [
             f"X: {self._format_value(manifest.x_start)} to {self._format_value(manifest.x_end)} by {self._format_value(manifest.x_increment)}",
             f"Y: {self._format_value(manifest.y_start)} to {self._format_value(manifest.y_end)} by {self._format_value(manifest.y_increment)}",
         ]
-        if manifest.exclusion_regions:
-            labels.append(f"Masks: {len(manifest.exclusion_regions)}")
+        if exclusion_boxes:
+            labels.append(f"Masks: {len(exclusion_boxes)}")
+        if stage_errors:
+            labels.append(f"Check: {stage_errors[0].get('step', 'preflight')} failed")
         anchor_x = int(max(8, left))
         anchor_y = int(max(8, top - 40))
 
@@ -419,3 +479,106 @@ class DigitizerRunner:
         for channel in range(channel_count):
             averages.append(round(sum(int(pixel[channel]) for pixel in pixels) / len(pixels)))
         return tuple(averages)
+
+    @staticmethod
+    def _write_runner_log(
+        output_log_path: Path,
+        lines: list[str],
+        stdout: str,
+        stderr: str,
+    ) -> None:
+        output_log_path.write_text(
+            "\n".join(
+                [
+                    *lines,
+                    "",
+                    "STDOUT:",
+                    stdout or "",
+                    "",
+                    "STDERR:",
+                    stderr or "",
+                ]
+            ).strip()
+            + "\n",
+            encoding="utf-8",
+        )
+
+    @staticmethod
+    def _read_image_size(image_path: Path) -> tuple[int, int]:
+        with Image.open(image_path) as image:
+            return image.size
+
+    def _project_exclusion_regions(
+        self,
+        manifest: ImageManifest,
+        source_width: int,
+        source_height: int,
+        prepared_width: int,
+        prepared_height: int,
+    ) -> list[dict]:
+        if not manifest.exclusion_regions:
+            return []
+
+        crop_left = manifest.crop_left if manifest.crop_left is not None else 0.0
+        crop_top = manifest.crop_top if manifest.crop_top is not None else 0.0
+        crop_right = manifest.crop_right if manifest.crop_right is not None else 1.0
+        crop_bottom = manifest.crop_bottom if manifest.crop_bottom is not None else 1.0
+
+        crop_x0 = source_width * crop_left
+        crop_y0 = source_height * crop_top
+        crop_x1 = source_width * crop_right
+        crop_y1 = source_height * crop_bottom
+        crop_width = crop_x1 - crop_x0
+        crop_height = crop_y1 - crop_y0
+
+        if crop_width <= 0 or crop_height <= 0:
+            return []
+
+        boxes: list[dict] = []
+        for region in manifest.exclusion_regions:
+            region_x0 = max(crop_x0, source_width * region.left)
+            region_y0 = max(crop_y0, source_height * region.top)
+            region_x1 = min(crop_x1, source_width * region.right)
+            region_y1 = min(crop_y1, source_height * region.bottom)
+            if region_x1 <= region_x0 or region_y1 <= region_y0:
+                continue
+
+            crop_points = [
+                (region_x0 - crop_x0, region_y0 - crop_y0),
+                (region_x1 - crop_x0, region_y0 - crop_y0),
+                (region_x1 - crop_x0, region_y1 - crop_y0),
+                (region_x0 - crop_x0, region_y1 - crop_y0),
+            ]
+            rotated = [
+                self._rotate_point(
+                    point_x,
+                    point_y,
+                    crop_width,
+                    crop_height,
+                    manifest.rotation or 0,
+                )
+                for point_x, point_y in crop_points
+            ]
+            xs = [point[0] for point in rotated]
+            ys = [point[1] for point in rotated]
+            left = self._clamp(min(xs), 0, prepared_width - 1)
+            top = self._clamp(min(ys), 0, prepared_height - 1)
+            right = self._clamp(max(xs), 0, prepared_width - 1)
+            bottom = self._clamp(max(ys), 0, prepared_height - 1)
+            boxes.append(
+                {
+                    "label": region.label or "mask",
+                    "bounds": (left, top, right, bottom),
+                }
+            )
+        return boxes
+
+    @staticmethod
+    def _rotate_point(x_coord: float, y_coord: float, width: float, height: float, rotation: int) -> tuple[float, float]:
+        if rotation == 90:
+            return height - y_coord, x_coord
+        if rotation == 180:
+            return width - x_coord, height - y_coord
+        if rotation == 270:
+            return y_coord, width - x_coord
+        return x_coord, y_coord

@@ -15,8 +15,9 @@ from fastapi.templating import Jinja2Templates
 
 from .config import settings
 from .manifest_service import ManifestService
+from .preflight import build_preflight_report
 from .runner import DigitizerRunner
-from .schemas import ImageManifest
+from .schemas import ImageManifest, PreflightReport
 from .store import (
     append_image_log,
     create_batch,
@@ -27,6 +28,7 @@ from .store import (
     list_batches,
     refresh_batch_status,
     serialize_manifest,
+    serialize_preflight,
     update_batch,
     update_image,
 )
@@ -210,6 +212,8 @@ async def save_review(
     image = get_image(settings, image_id)
     if not image:
         raise HTTPException(status_code=404, detail="Image not found")
+    batch = get_batch(settings, image["batch_id"])
+    threshold = batch.get("auto_approve_threshold", settings.auto_approve_threshold) if batch else settings.auto_approve_threshold
 
     rerun_requested = rerun_after_save == "true"
     keep_in_review = review_required == "on" and not rerun_requested
@@ -237,48 +241,53 @@ async def save_review(
         review_required=keep_in_review,
     )
 
-    next_status = "queued" if rerun_requested and not manifest.review_required else "needs_review"
-    preview_fields: dict[str, str | None] = {}
-    preview_error = None
-    if next_status == "needs_review":
-        preview_fields, preview_error = ensure_review_preview(image, manifest)
+    try:
+        preview_fields, report = ensure_preflight_preview(image, manifest)
+        saved_manifest = manifest.model_copy(update={"review_required": manifest.review_required or report.blocking})
+        next_status = "queued" if rerun_requested and not saved_manifest.review_required else "needs_review"
+        error_message = build_review_message(saved_manifest, threshold, report, False)
+        if not rerun_requested and not saved_manifest.review_required and not report.blocking:
+            error_message = (
+                report.warnings[0]
+                if report.warnings
+                else "Review saved. Click 'Rerun Image' when you are ready to continue."
+            )
+        if next_status == "queued":
+            error_message = None
 
-    error_message = (
-        "Clear 'Keep this image in review' and save before rerun."
-        if manifest.review_required
-        else None
-    )
-    if preview_error:
-        error_message = (
-            f"{error_message} Review grid preview failed: {preview_error}"
-            if error_message
-            else f"Review grid preview failed: {preview_error}"
+        update_image(
+            settings,
+            image_id,
+            manifest_json=serialize_manifest(saved_manifest.model_dump()),
+            llm_confidence=saved_manifest.llm_confidence,
+            review_required=1 if saved_manifest.review_required else 0,
+            status=next_status,
+            error_message=error_message,
+            **preview_fields,
+        )
+        append_image_log(
+            settings,
+            image_id,
+            "review_saved",
+            (
+                "Review saved and image queued for digitization."
+                if rerun_requested and not saved_manifest.review_required
+                else "Review saved; image remains paused for manual review."
+            ),
+            level="info" if not saved_manifest.review_required else "warning",
         )
 
-    update_image(
-        settings,
-        image_id,
-        manifest_json=serialize_manifest(manifest.model_dump()),
-        llm_confidence=manifest.llm_confidence,
-        review_required=1 if manifest.review_required else 0,
-        status=next_status,
-        error_message=error_message,
-        **preview_fields,
-    )
-    append_image_log(
-        settings,
-        image_id,
-        "review_saved",
-        (
-            "Review saved and image queued for digitization."
-            if rerun_requested and not manifest.review_required
-            else "Review saved; image remains paused for manual review."
-        ),
-        level="info" if not manifest.review_required else "warning",
-    )
-
-    if rerun_requested and not manifest.review_required:
-        executor.submit(process_single_image, image_id, False)
+        if rerun_requested and not saved_manifest.review_required:
+            executor.submit(process_single_image, image_id, False)
+    except Exception as error:  # noqa: BLE001
+        update_image(settings, image_id, status="failed", error_message=str(error))
+        append_image_log(
+            settings,
+            image_id,
+            "preflight_failed",
+            str(error),
+            level="error",
+        )
 
     return RedirectResponse(url=f"/images/{image_id}", status_code=303)
 
@@ -302,6 +311,23 @@ def rerun_image(image_id: str):
             image_id,
             "rerun_blocked",
             "Rerun was blocked because the image is still marked for review.",
+            level="warning",
+        )
+        return RedirectResponse(url=f"/images/{image_id}", status_code=303)
+
+    preflight_report = image.get("preflight_report")
+    if preflight_report and preflight_report.get("blocking"):
+        update_image(
+            settings,
+            image_id,
+            status="needs_review",
+            error_message=first_blocking_message(preflight_report),
+        )
+        append_image_log(
+            settings,
+            image_id,
+            "rerun_blocked",
+            "Rerun was blocked because pre-flight checks still have blocking failures.",
             level="warning",
         )
         return RedirectResponse(url=f"/images/{image_id}", status_code=303)
@@ -366,24 +392,18 @@ def process_single_image(image_id: str, regenerate_manifest: bool) -> None:
             manifest = ImageManifest.model_validate(image["manifest"])
             append_image_log(settings, image_id, "manifest_loaded", "Using the saved reviewed manifest.")
 
-        requires_review = (
-            manifest.should_review(threshold)
-            if regenerate_manifest
-            else manifest.review_required
-        )
+        preview_fields, report = ensure_preflight_preview(image, manifest)
+        manifest_for_run = manifest.model_copy(update={"review_required": manifest.review_required or report.blocking})
+        requires_review = manifest_for_run.should_review(threshold) if regenerate_manifest else manifest_for_run.review_required
 
         if requires_review:
-            preview_fields, preview_error = ensure_review_preview(image, manifest)
-            review_message = (
-                "Manifest needs review before digitization."
-                if manifest.review_required
-                else f"Confidence {manifest.llm_confidence:.2f} is below the batch threshold of {threshold:.2f}."
-            )
-            if preview_error:
-                review_message = f"{review_message} Review grid preview failed: {preview_error}"
+            review_message = build_review_message(manifest_for_run, threshold, report, regenerate_manifest)
             update_image(
                 settings,
                 image_id,
+                manifest_json=serialize_manifest(manifest_for_run.model_dump()),
+                llm_confidence=manifest_for_run.llm_confidence,
+                review_required=1 if manifest_for_run.review_required else 0,
                 status="needs_review",
                 error_message=review_message,
                 **preview_fields,
@@ -392,7 +412,7 @@ def process_single_image(image_id: str, regenerate_manifest: bool) -> None:
                 settings,
                 image_id,
                 "needs_review",
-                "Processing paused because the manifest needs manual review.",
+                "Processing paused because pre-flight checks or the manifest still need manual review.",
                 level="warning",
             )
             return
@@ -403,7 +423,8 @@ def process_single_image(image_id: str, regenerate_manifest: bool) -> None:
             batch_id=image["batch_id"],
             image_id=image["id"],
             image_path=Path(image["original_path"]),
-            manifest=manifest,
+            manifest=manifest_for_run,
+            prepared_path=Path(preview_fields["prepared_path"]) if preview_fields.get("prepared_path") else None,
         )
         update_image(
             settings,
@@ -413,6 +434,7 @@ def process_single_image(image_id: str, regenerate_manifest: bool) -> None:
             output_csv_path=str(output_csv_path),
             output_meta_path=str(output_meta_path),
             output_log_path=str(output_log_path),
+            manifest_json=serialize_manifest(manifest_for_run.model_dump()),
             status="completed",
             error_message=None,
             review_required=0,
@@ -434,35 +456,41 @@ def process_single_image(image_id: str, regenerate_manifest: bool) -> None:
         )
 
 
-def ensure_review_preview(image: dict, manifest: ImageManifest) -> tuple[dict[str, str | None], str | None]:
-    try:
-        prepared_path, review_overlay_path = digitizer_runner.build_review_preview(
-            batch_id=image["batch_id"],
-            image_id=image["id"],
-            image_path=Path(image["original_path"]),
-            manifest=manifest,
-        )
-        append_image_log(
-            settings,
-            image["id"],
-            "review_preview",
-            "Generated a manifest grid preview for manual review.",
-        )
-        return {
-            "prepared_path": str(prepared_path),
-            "review_overlay_path": str(review_overlay_path),
-        }, None
-    except Exception as error:  # noqa: BLE001
-        append_image_log(
-            settings,
-            image["id"],
-            "review_preview_failed",
-            f"Review grid preview failed: {error}",
-            level="warning",
-        )
-        return {
-            "review_overlay_path": None,
-        }, str(error)
+def ensure_preflight_preview(image: dict, manifest: ImageManifest) -> tuple[dict[str, str | None], PreflightReport]:
+    append_image_log(
+        settings,
+        image["id"],
+        "processing_preflight",
+        "Running staged pre-flight checks before digitization.",
+    )
+    artifacts = digitizer_runner.run_preflight(
+        batch_id=image["batch_id"],
+        image_id=image["id"],
+        image_path=Path(image["original_path"]),
+        manifest=manifest,
+    )
+    report = build_preflight_report(
+        manifest=manifest,
+        prepared_path=artifacts.prepared_path,
+        preview_payload=artifacts.preview_payload,
+    )
+    append_image_log(
+        settings,
+        image["id"],
+        "preflight_ready",
+        (
+            "Pre-flight checks found blocking issues that require review."
+            if report.blocking
+            else "Pre-flight checks completed successfully."
+        ),
+        level="warning" if report.blocking else "info",
+    )
+    return {
+        "prepared_path": str(artifacts.prepared_path),
+        "review_overlay_path": str(artifacts.review_overlay_path),
+        "output_log_path": str(artifacts.output_log_path),
+        "preflight_json": serialize_preflight(report.model_dump()),
+    }, report
 
 
 def parse_optional_float(value: str) -> float | None:
@@ -506,10 +534,14 @@ def build_export_archive(batch: dict) -> Path:
         for image in batch["images"]:
             if image.get("manifest_json"):
                 archive.writestr(f"manifests/{image['id']}.json", image["manifest_json"])
+            if image.get("preflight_json"):
+                archive.writestr(f"preflight/{image['id']}.json", image["preflight_json"])
             if image.get("original_path") and Path(image["original_path"]).exists():
                 archive.write(image["original_path"], arcname=f"images/{image['filename']}")
             if image.get("prepared_path") and Path(image["prepared_path"]).exists():
                 archive.write(image["prepared_path"], arcname=f"prepared/{image['id']}{Path(image['prepared_path']).suffix}")
+            if image.get("review_overlay_path") and Path(image["review_overlay_path"]).exists():
+                archive.write(image["review_overlay_path"], arcname=f"review/{image['id']}.png")
             if image.get("annotated_path") and Path(image["annotated_path"]).exists():
                 archive.write(image["annotated_path"], arcname=f"annotated/{image['id']}.png")
             if image.get("output_csv_path") and Path(image["output_csv_path"]).exists():
@@ -550,3 +582,30 @@ def uniquify_filename(filename: str, seen_names: dict[str, int]) -> str:
     seen_names[filename] = index
     seen_names[candidate] = 1
     return candidate
+
+
+def first_blocking_message(preflight_report: dict | None) -> str:
+    if not preflight_report:
+        return "Pre-flight checks require manual review before rerun."
+    for check in preflight_report.get("checks", []):
+        if check.get("status") == "fail":
+            return check.get("message") or "Pre-flight checks require manual review before rerun."
+    return "Pre-flight checks require manual review before rerun."
+
+
+def build_review_message(
+    manifest: ImageManifest,
+    threshold: float,
+    report: PreflightReport,
+    apply_threshold: bool,
+) -> str:
+    reasons: list[str] = []
+    if report.blocking:
+        reasons.append(first_blocking_message(report.model_dump()))
+    if manifest.review_required and not report.blocking:
+        reasons.append("Manifest needs review before digitization.")
+    elif apply_threshold and manifest.llm_confidence < threshold and not manifest.review_required:
+        reasons.append(f"Confidence {manifest.llm_confidence:.2f} is below the batch threshold of {threshold:.2f}.")
+    elif not report.blocking and report.warnings:
+        reasons.append(report.warnings[0])
+    return " ".join(reasons) if reasons else "Manual review is required before digitization."

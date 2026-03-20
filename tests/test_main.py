@@ -9,7 +9,7 @@ from unittest import mock
 from fastapi.testclient import TestClient
 
 from app import main
-from app.schemas import ImageManifest
+from app.schemas import ImageManifest, PreflightCheck, PreflightReport
 from app.store import create_batch, create_image, get_image, init_db, serialize_manifest, update_batch, update_image
 from tests.test_store import make_settings
 
@@ -47,8 +47,48 @@ class MainFlowTests(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
+    def make_preflight_result(
+        self,
+        blocking: bool = False,
+        warning: str | None = None,
+    ) -> tuple[dict[str, str | None], PreflightReport]:
+        prepared_path = self.root / "preflight-prepared.png"
+        review_overlay_path = self.root / "preflight-review.png"
+        preflight_log_path = self.root / "preflight.log"
+        prepared_path.write_text("prepared", encoding="utf-8")
+        review_overlay_path.write_text("overlay", encoding="utf-8")
+        preflight_log_path.write_text("preflight", encoding="utf-8")
+
+        checks = [
+            PreflightCheck(
+                id="axis-plot-size",
+                stage="axis_preflight",
+                severity="blocking" if blocking else "info",
+                status="fail" if blocking else "pass",
+                message="Detected plot bounds are collapsed." if blocking else "Detected plot bounds are large enough to continue.",
+                evidence={"plot_width": 2} if blocking else {"plot_width": 180},
+            )
+        ]
+        warnings = [warning] if warning else []
+        report = PreflightReport(
+            blocking=blocking,
+            checks=checks,
+            warnings=warnings,
+            metrics={"plot_width": 2 if blocking else 180},
+        )
+        return {
+            "prepared_path": str(prepared_path),
+            "review_overlay_path": str(review_overlay_path),
+            "output_log_path": str(preflight_log_path),
+            "preflight_json": main.serialize_preflight(report.model_dump()),
+        }, report
+
     def test_save_review_and_rerun_clears_review_flag(self) -> None:
-        with TestClient(main.app) as client:
+        preflight_result = self.make_preflight_result()
+        with (
+            TestClient(main.app) as client,
+            mock.patch.object(main, "ensure_preflight_preview", return_value=preflight_result),
+        ):
             response = client.post(
                 f"/images/{self.image_id}/review",
                 data={
@@ -78,17 +118,14 @@ class MainFlowTests(unittest.TestCase):
         self.assertEqual(self.fake_executor.calls[0][0], main.process_single_image)
 
     def test_save_review_generates_preview_when_image_stays_in_review(self) -> None:
-        prepared_path = self.root / "saved-prepared.png"
-        review_overlay_path = self.root / "saved-review.png"
-        prepared_path.write_text("prepared", encoding="utf-8")
-        review_overlay_path.write_text("overlay", encoding="utf-8")
+        preflight_result = self.make_preflight_result()
 
         with (
             TestClient(main.app) as client,
             mock.patch.object(
-                main.digitizer_runner,
-                "build_review_preview",
-                return_value=(prepared_path, review_overlay_path),
+                main,
+                "ensure_preflight_preview",
+                return_value=preflight_result,
             ),
         ):
             response = client.post(
@@ -130,7 +167,7 @@ class MainFlowTests(unittest.TestCase):
         image = get_image(self.settings, self.image_id)
         self.assertTrue(image["review_required"])
         self.assertEqual(image["status"], "needs_review")
-        self.assertEqual(Path(image["review_overlay_path"]), review_overlay_path)
+        self.assertEqual(Path(image["review_overlay_path"]), Path(preflight_result[0]["review_overlay_path"]))
         self.assertAlmostEqual(image["manifest"]["crop_left"], 0.15)
         self.assertAlmostEqual(image["manifest"]["crop_bottom"], 0.82)
         self.assertEqual(len(image["manifest"]["exclusion_regions"]), 1)
@@ -153,26 +190,19 @@ class MainFlowTests(unittest.TestCase):
             llm_confidence=0.45,
             review_required=True,
         )
-        prepared_path = self.root / "review-prepared.png"
-        review_overlay_path = self.root / "review-overlay.png"
-        prepared_path.write_text("prepared", encoding="utf-8")
-        review_overlay_path.write_text("overlay", encoding="utf-8")
+        preflight_result = self.make_preflight_result()
 
         with (
             mock.patch.object(main.manifest_service, "generate_manifest", return_value=manifest),
-            mock.patch.object(
-                main.digitizer_runner,
-                "build_review_preview",
-                return_value=(prepared_path, review_overlay_path),
-            ),
+            mock.patch.object(main, "ensure_preflight_preview", return_value=preflight_result),
         ):
             main.process_single_image(self.image_id, True)
 
         image = get_image(self.settings, self.image_id)
         self.assertEqual(image["status"], "needs_review")
-        self.assertEqual(Path(image["review_overlay_path"]), review_overlay_path)
+        self.assertEqual(Path(image["review_overlay_path"]), Path(preflight_result[0]["review_overlay_path"]))
         stages = [entry["stage"] for entry in image["processing_log"]]
-        self.assertEqual(stages, ["processing_manifest", "manifest_generated", "review_preview", "needs_review"])
+        self.assertEqual(stages, ["processing_manifest", "manifest_generated", "needs_review"])
 
     def test_process_single_image_uses_batch_threshold(self) -> None:
         update_batch(self.settings, self.batch_id, auto_approve_threshold=0.90)
@@ -193,25 +223,49 @@ class MainFlowTests(unittest.TestCase):
             llm_confidence=0.85,
             review_required=False,
         )
-        prepared_path = self.root / "threshold-prepared.png"
-        review_overlay_path = self.root / "threshold-overlay.png"
-        prepared_path.write_text("prepared", encoding="utf-8")
-        review_overlay_path.write_text("overlay", encoding="utf-8")
+        preflight_result = self.make_preflight_result()
 
         with (
             mock.patch.object(main.manifest_service, "generate_manifest", return_value=manifest),
-            mock.patch.object(
-                main.digitizer_runner,
-                "build_review_preview",
-                return_value=(prepared_path, review_overlay_path),
-            ),
+            mock.patch.object(main, "ensure_preflight_preview", return_value=preflight_result),
         ):
             main.process_single_image(self.image_id, True)
 
         image = get_image(self.settings, self.image_id)
         self.assertEqual(image["status"], "needs_review")
         self.assertIn("below the batch threshold of 0.90", image["error_message"])
-        self.assertEqual(Path(image["review_overlay_path"]), review_overlay_path)
+        self.assertEqual(Path(image["review_overlay_path"]), Path(preflight_result[0]["review_overlay_path"]))
+
+    def test_process_single_image_pauses_on_blocking_preflight(self) -> None:
+        manifest = ImageManifest(
+            image_id=self.image_id,
+            filename="test.png",
+            num_curves=2,
+            x_start=0,
+            x_end=60,
+            x_increment=10,
+            y_start=0,
+            y_end=100,
+            y_increment=25,
+            y_text_vertical=True,
+            rotation=0,
+            crop_hint=None,
+            notes="blocked",
+            llm_confidence=0.95,
+            review_required=False,
+        )
+        preflight_result = self.make_preflight_result(blocking=True)
+
+        with (
+            mock.patch.object(main.manifest_service, "generate_manifest", return_value=manifest),
+            mock.patch.object(main, "ensure_preflight_preview", return_value=preflight_result),
+        ):
+            main.process_single_image(self.image_id, True)
+
+        image = get_image(self.settings, self.image_id)
+        self.assertEqual(image["status"], "needs_review")
+        self.assertTrue(image["review_required"])
+        self.assertIn("Detected plot bounds are collapsed", image["error_message"])
 
     def test_process_single_image_logs_runner_failure(self) -> None:
         manifest = ImageManifest(
@@ -238,8 +292,12 @@ class MainFlowTests(unittest.TestCase):
             review_required=0,
             status="queued",
         )
+        preflight_result = self.make_preflight_result()
 
-        with mock.patch.object(main.digitizer_runner, "run", side_effect=RuntimeError("digitizer blew up")):
+        with (
+            mock.patch.object(main, "ensure_preflight_preview", return_value=preflight_result),
+            mock.patch.object(main.digitizer_runner, "run", side_effect=RuntimeError("digitizer blew up")),
+        ):
             main.process_single_image(self.image_id, False)
 
         image = get_image(self.settings, self.image_id)
@@ -287,6 +345,7 @@ class MainFlowTests(unittest.TestCase):
             review_required=0,
             status="queued",
         )
+        preflight_result = self.make_preflight_result()
 
         prepared_path = self.root / "prepared.png"
         annotated_path = self.root / "annotated.png"
@@ -296,10 +355,13 @@ class MainFlowTests(unittest.TestCase):
         for path in [prepared_path, annotated_path, output_csv_path, output_meta_path, output_log_path]:
             path.write_text("ok", encoding="utf-8")
 
-        with mock.patch.object(
-            main.digitizer_runner,
-            "run",
-            return_value=(prepared_path, output_csv_path, output_meta_path, output_log_path, annotated_path),
+        with (
+            mock.patch.object(main, "ensure_preflight_preview", return_value=preflight_result),
+            mock.patch.object(
+                main.digitizer_runner,
+                "run",
+                return_value=(prepared_path, output_csv_path, output_meta_path, output_log_path, annotated_path),
+            ),
         ):
             main.process_single_image(self.image_id, False)
 

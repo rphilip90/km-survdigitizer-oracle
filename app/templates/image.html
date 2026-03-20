@@ -10,9 +10,10 @@
         <div class="actions">
             <span class="status {{ image.status }}">{{ image.status }}</span>
             {% set action_manifest = image.manifest or {} %}
+            {% set rerun_blocked = (action_manifest and action_manifest.review_required) or (image.preflight_report and image.preflight_report.blocking) %}
             <form action="/images/{{ image.id }}/rerun" method="post">
-                <button type="submit" class="btn btn-primary" {% if action_manifest and action_manifest.review_required %}disabled{% endif %}>
-                    {% if action_manifest and action_manifest.review_required %}
+                <button type="submit" class="btn btn-primary" {% if rerun_blocked %}disabled{% endif %}>
+                    {% if rerun_blocked %}
                     Save Review First
                     {% else %}
                     Rerun Image
@@ -42,7 +43,7 @@
         {% if image.review_overlay_path and image.status == "needs_review" %}
         <div class="artifact-list">
             <h3>Manual Review Grid Preview</h3>
-            <p class="panel-hint">Detected plot bounds plus the current manifest range and increment. Save review to refresh it after editing the fields.</p>
+            <p class="panel-hint">Detected plot bounds plus the current manifest range, increment, and exclusion masks. Save review to rerun pre-flight and refresh it after editing the fields.</p>
             <img src="/images/{{ image.id }}/artifact/review" alt="{{ image.filename }} review grid preview" class="image-preview">
         </div>
         {% endif %}
@@ -170,13 +171,53 @@
                 <input type="checkbox" name="review_required" {% if review_flag %}checked{% endif %}>
                 <span>Keep this image in review</span>
             </label>
-            <p class="panel-hint">If you clear "Keep this image in review", the saved manifest can run even when the original confidence stays below the auto-approve threshold. "Save Review and Rerun" will clear that flag automatically.</p>
+            <p class="panel-hint">If you clear "Keep this image in review", the saved manifest can run even when the original confidence stays below the auto-approve threshold. Both actions rerun pre-flight first. "Save Review and Rerun" only continues when no blocking pre-flight checks remain.</p>
             <div class="form-actions">
                 <button type="submit" class="btn btn-secondary">Save Review</button>
                 <button type="submit" name="rerun_after_save" value="true" class="btn btn-primary">Save Review and Rerun</button>
             </div>
         </form>
     </div>
+</section>
+<section class="panel">
+    <div class="section-head">
+        <div>
+            <h2>Pre-Flight Checks</h2>
+            <p class="panel-hint">These checks run before the full SurvdigitizeR pipeline. Blocking checks pause the image in review instead of letting the package fail deeper in the workflow.</p>
+        </div>
+        {% if image.preflight_report %}
+        <div class="actions">
+            <span class="status {{ 'needs_review' if image.preflight_report.blocking else 'completed' }}">
+                {{ 'blocking' if image.preflight_report.blocking else 'ready' }}
+            </span>
+        </div>
+        {% endif %}
+    </div>
+    {% if image.preflight_report and image.preflight_report.checks %}
+    <div class="preflight-list">
+        {% for check in image.preflight_report.checks %}
+        <div class="preflight-check preflight-check-{{ check.status }}">
+            <div class="preflight-head">
+                <span class="preflight-stage">{{ check.stage }}</span>
+                <span class="status {{ 'completed' if check.status == 'pass' else ('needs_review' if check.status == 'warn' else 'failed') }}">{{ check.status }}</span>
+            </div>
+            <div class="preflight-message">{{ check.message }}</div>
+            {% if check.evidence %}
+            <dl class="preflight-evidence">
+                {% for key, value in check.evidence.items() %}
+                <div>
+                    <dt>{{ key }}</dt>
+                    <dd>{{ value }}</dd>
+                </div>
+                {% endfor %}
+            </dl>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="panel-hint">No pre-flight report has been saved yet. Save review or run the image to generate one.</p>
+    {% endif %}
 </section>
 <section class="panel">
     <h2>Processing Timeline</h2>

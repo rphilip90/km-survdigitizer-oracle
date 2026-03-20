@@ -20,6 +20,38 @@ handle_step_error <- function(error, step) {
   stop(sprintf("SurvdigitizeR failed in %s: %s", step, conditionMessage(error)), call. = FALSE)
 }
 
+capture_step <- function(expr, step) {
+  tryCatch(
+    list(ok = TRUE, value = expr, error = NULL, step = step),
+    error = function(error) list(ok = FALSE, value = NULL, error = conditionMessage(error), step = step)
+  )
+}
+
+safe_color_cluster <- function(fig.df, num_curves = 3, censoring = FALSE, enhance = FALSE) {
+  if (censoring) {
+    fig.df <- fig.df[fig.df$l >= 0.2, ]
+  }
+  fig.grp <- fig.df[, c("x", "y")]
+  if (num_curves == 1) {
+    fig.grp$group <- 1L
+    return(fig.grp)
+  }
+  in1 <- fig.df[, c("h", "s", "l")]
+  in2 <- fig.df[, c("h", "s", "l")]
+  in2[, "s"] <- in2[, "s"] * 100
+  in2[, "l"] <- in2[, "l"] * 100
+
+  adaptive_sampsize <- min(500, max(1, nrow(fig.df)))
+  if (enhance == TRUE) {
+    out1 <- cluster::clara(x = in2, sampsize = adaptive_sampsize, k = num_curves, samples = 50, pamLike = TRUE)
+  } else {
+    out1 <- cluster::clara(x = in1, sampsize = adaptive_sampsize, k = num_curves, samples = 50, pamLike = TRUE)
+  }
+
+  fig.grp$group <- out1$clustering
+  fig.grp
+}
+
 collapse_break_matches <- function(break_positions, label_table, start_col, end_col) {
   if (nrow(label_table) == 0) {
     return(numeric(0))
@@ -246,17 +278,122 @@ safe_range_detect <- function(step1_fig, step2_axes, x_start, x_end, x_increment
     Y_0pixel = Y_0pixel,
     y_increment = y_increment / break_indicator_y,
     X_0pixel = X_0pixel,
-    x_increment = x_increment / x_pixels_increment
+    x_increment = x_increment / x_pixels_increment,
+    diagnostics = list(
+      expected_x_ticks = length(X_actual),
+      expected_y_ticks = length(Y_actual),
+      detected_x_breaks = length(loc_of_breaks_x),
+      detected_y_breaks = length(y_breaks_act),
+      x_pixels_increment = x_pixels_increment,
+      y_pixels_increment = break_indicator_y
+    )
   )
+}
+
+build_plot_metadata <- function(step1, step2) {
+  if (is.null(step1) || is.null(step2) || is.null(step2$axes)) {
+    return(list(
+      width = if (!is.null(step1)) dim(step1)[2] else NULL,
+      height = if (!is.null(step1)) dim(step1)[1] else NULL,
+      plot_bounds = NULL,
+      metrics = list(),
+      axis_pixels = NULL
+    ))
+  }
+
+  plot_left <- max(0, min(step2$axes$xaxis) - 1)
+  plot_right <- max(0, max(step2$axes$xaxis) - 1)
+  plot_top <- max(0, dim(step1)[1] - max(step2$axes$yaxis))
+  plot_bottom <- max(0, dim(step1)[1] - min(step2$axes$yaxis))
+
+  plot_width <- length(step2$axes$xaxis)
+  plot_height <- length(step2$axes$yaxis)
+
+  list(
+    width = dim(step1)[2],
+    height = dim(step1)[1],
+    plot_bounds = list(
+      left = plot_left,
+      right = plot_right,
+      top = plot_top,
+      bottom = plot_bottom
+    ),
+    axis_pixels = list(
+      x = list(start = plot_left, end = plot_right),
+      y = list(start = plot_bottom, end = plot_top)
+    ),
+    metrics = list(
+      prepared_width = dim(step1)[2],
+      prepared_height = dim(step1)[1],
+      source_width = dim(step1)[2],
+      source_height = dim(step1)[1],
+      plot_width = plot_width,
+      plot_height = plot_height,
+      plot_aspect_ratio = if (plot_height > 0) plot_width / plot_height else NULL,
+      x_axis_pixel_span = plot_width,
+      y_axis_pixel_span = plot_height
+    )
+  )
+}
+
+write_preflight_json <- function(output_review_json_path, image_path, manifest, step1_result, step2_result, step3_result, step7_result) {
+  step1 <- if (step1_result$ok) step1_result$value else NULL
+  step2 <- if (step2_result$ok) step2_result$value else NULL
+  metadata <- build_plot_metadata(step1, step2)
+
+  stage_errors <- list()
+  for (step_result in list(step1_result, step2_result, step3_result, step7_result)) {
+    if (!step_result$ok) {
+      stage_errors[[length(stage_errors) + 1]] <- list(
+        step = step_result$step,
+        message = step_result$error
+      )
+    }
+  }
+
+  metrics <- metadata$metrics
+  if (step3_result$ok && !is.null(step3_result$value)) {
+    metrics$cleaned_object_count <- nrow(step3_result$value)
+    metrics$adaptive_sampsize <- min(500, max(1, nrow(step3_result$value)))
+  }
+  if (step7_result$ok && !is.null(step7_result$value$diagnostics)) {
+    diagnostics <- step7_result$value$diagnostics
+    for (metric_name in names(diagnostics)) {
+      metrics[[metric_name]] <- diagnostics[[metric_name]]
+    }
+  }
+
+  review_json <- list(
+    image = basename(image_path),
+    width = metadata$width,
+    height = metadata$height,
+    source_width = metadata$width,
+    source_height = metadata$height,
+    plot_bounds = metadata$plot_bounds,
+    axis_pixels = metadata$axis_pixels,
+    metrics = metrics,
+    stage_errors = stage_errors,
+    manifest_summary = list(
+      num_curves = manifest$num_curves,
+      x_start = manifest$x_start,
+      x_end = manifest$x_end,
+      x_increment = manifest$x_increment,
+      y_start = manifest$y_start,
+      y_end = manifest$y_end,
+      y_increment = manifest$y_increment
+    )
+  )
+
+  jsonlite::write_json(review_json, output_review_json_path, auto_unbox = TRUE, pretty = TRUE)
 }
 
 image_path <- read_flag("--image")
 manifest_path <- read_flag("--manifest")
-preview_only <- "--preview-only" %in% args
+preflight_only <- "--preflight-only" %in% args || "--preview-only" %in% args
 output_review_json_path <- read_optional_flag("--output-review-json")
-output_csv_path <- if (preview_only) NULL else read_flag("--output-csv")
-output_meta_path <- if (preview_only) NULL else read_flag("--output-meta")
-output_overlay_json_path <- if (preview_only) NULL else read_flag("--output-overlay-json")
+output_csv_path <- if (preflight_only) NULL else read_flag("--output-csv")
+output_meta_path <- if (preflight_only) NULL else read_flag("--output-meta")
+output_overlay_json_path <- if (preflight_only) NULL else read_flag("--output-overlay-json")
 
 if (!requireNamespace("jsonlite", quietly = TRUE)) {
   stop("The jsonlite package is required. Run Rscript scripts/bootstrap_r.R first.", call. = FALSE)
@@ -271,6 +408,67 @@ if (!requireNamespace("dplyr", quietly = TRUE)) {
 }
 
 manifest <- jsonlite::fromJSON(manifest_path, simplifyVector = TRUE)
+if (preflight_only) {
+  step1_result <- capture_step(
+    SurvdigitizeR:::img_read(path = image_path),
+    "Step 1: Loading image"
+  )
+  step2_result <- if (step1_result$ok) {
+    capture_step(
+      SurvdigitizeR:::axes_identify(fig.hsl = step1_result$value, bg_lightness = 0.3),
+      "Step 2: Identifying axes"
+    )
+  } else {
+    list(ok = FALSE, value = NULL, error = "Skipped because image loading failed.", step = "Step 2: Identifying axes")
+  }
+  step3_result <- if (step2_result$ok) {
+    capture_step(
+      SurvdigitizeR:::fig_clean(
+        fig.hsl = step2_result$value$fig.hsl,
+        bg_lightness = 0.3,
+        attempt_OCR = FALSE,
+        word_sensitivity = 30
+      ),
+      "Step 3: Cleaning figure"
+    )
+  } else {
+    list(ok = FALSE, value = NULL, error = "Skipped because axis identification failed.", step = "Step 3: Cleaning figure")
+  }
+  step7_result <- if (step2_result$ok && step1_result$ok) {
+    capture_step(
+      safe_range_detect(
+        step1_fig = step1_result$value,
+        step2_axes = step2_result$value$axes,
+        x_start = manifest$x_start,
+        x_end = manifest$x_end,
+        x_increment = manifest$x_increment,
+        y_start = manifest$y_start,
+        y_end = manifest$y_end,
+        y_increment = manifest$y_increment,
+        y_text_vertical = manifest$y_text_vertical
+      ),
+      "Step 7: Detecting ranges"
+    )
+  } else {
+    list(ok = FALSE, value = NULL, error = "Skipped because axis identification failed.", step = "Step 7: Detecting ranges")
+  }
+
+  if (is.null(output_review_json_path)) {
+    stop("The --output-review-json flag is required in preflight mode.", call. = FALSE)
+  }
+
+  write_preflight_json(
+    output_review_json_path = output_review_json_path,
+    image_path = image_path,
+    manifest = manifest,
+    step1_result = step1_result,
+    step2_result = step2_result,
+    step3_result = step3_result,
+    step7_result = step7_result
+  )
+
+  quit(save = "no", status = 0)
+}
 
 step1 <- tryCatch(
   SurvdigitizeR:::img_read(path = image_path),
@@ -281,39 +479,6 @@ step2 <- tryCatch(
   SurvdigitizeR:::axes_identify(fig.hsl = step1, bg_lightness = 0.3),
   error = function(error) handle_step_error(error, "Step 2: Identifying axes")
 )
-
-if (!is.null(output_review_json_path)) {
-  plot_left <- max(0, min(step2$axes$xaxis) - 1)
-  plot_right <- max(0, max(step2$axes$xaxis) - 1)
-  plot_top <- max(0, dim(step1)[1] - max(step2$axes$yaxis))
-  plot_bottom <- max(0, dim(step1)[1] - min(step2$axes$yaxis))
-  review_json <- list(
-    image = basename(image_path),
-    width = dim(step1)[2],
-    height = dim(step1)[1],
-    plot_bounds = list(
-      left = plot_left,
-      right = plot_right,
-      top = plot_top,
-      bottom = plot_bottom
-    ),
-    axis_pixels = list(
-      x = list(
-        start = plot_left,
-        end = plot_right
-      ),
-      y = list(
-        start = plot_bottom,
-        end = plot_top
-      )
-    )
-  )
-  jsonlite::write_json(review_json, output_review_json_path, auto_unbox = TRUE, pretty = TRUE)
-}
-
-if (preview_only) {
-  quit(save = "no", status = 0)
-}
 
 step3 <- tryCatch(
   SurvdigitizeR:::fig_clean(
@@ -326,7 +491,7 @@ step3 <- tryCatch(
 )
 
 step4 <- tryCatch(
-  SurvdigitizeR:::color_cluster(
+  safe_color_cluster(
     fig.df = step3,
     num_curves = manifest$num_curves,
     censoring = FALSE,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -180,6 +180,28 @@ class ExclusionRegion(BaseModel):
         if self.bottom <= self.top:
             raise ValueError("exclusion region bottom must be greater than top")
         return self
+
+
+class PreflightCheck(BaseModel):
+    id: str
+    stage: Literal[
+        "manifest_preflight",
+        "prepared_image_preflight",
+        "axis_preflight",
+        "cluster_preflight",
+        "range_preflight",
+    ]
+    severity: Literal["info", "warning", "blocking"]
+    status: Literal["pass", "warn", "fail"]
+    message: str
+    evidence: dict[str, Any] | None = None
+
+
+class PreflightReport(BaseModel):
+    blocking: bool = False
+    checks: list[PreflightCheck] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    metrics: dict[str, Any] = Field(default_factory=dict)
 
 
 ImageManifest.model_rebuild()

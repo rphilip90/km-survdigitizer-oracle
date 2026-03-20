@@ -170,6 +170,44 @@ class RunnerTests(unittest.TestCase):
 
         self.assertTrue(output_review_path.exists())
 
+    def test_run_preflight_writes_preview_artifacts(self) -> None:
+        runner = DigitizerRunner(self.settings)
+
+        def fake_run(*args, **kwargs):  # noqa: ANN002, ANN003
+            result_dir = self.settings.result_dir / "batch-1"
+            result_dir.mkdir(parents=True, exist_ok=True)
+            (result_dir / "image-1.preflight.json").write_text(
+                json.dumps(
+                    {
+                        "width": 20,
+                        "height": 20,
+                        "source_width": 20,
+                        "source_height": 20,
+                        "plot_bounds": {
+                            "left": 3,
+                            "right": 18,
+                            "top": 2,
+                            "bottom": 17,
+                        },
+                        "metrics": {
+                            "prepared_width": 20,
+                            "prepared_height": 20,
+                            "plot_width": 15,
+                            "plot_height": 15,
+                        },
+                        "stage_errors": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+        with mock.patch("app.runner.subprocess.run", side_effect=fake_run):
+            artifacts = runner.run_preflight("batch-1", "image-1", self.image_path, self.manifest)
+
+        self.assertTrue(artifacts.review_overlay_path.exists())
+        self.assertEqual(artifacts.preview_payload["metrics"]["plot_width"], 15)
+
     def test_runner_requires_overlay_output(self) -> None:
         runner = DigitizerRunner(self.settings)
 
