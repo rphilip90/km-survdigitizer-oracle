@@ -2,6 +2,7 @@
 
 {% block content %}
 {% set manifest = image.manifest or {} %}
+{% set review_flag = manifest.get('review_required') if manifest else false %}
 <section class="panel">
     <div class="section-head">
         <div>
@@ -39,33 +40,62 @@
 
 <section class="two-col">
     <div class="panel image-panel">
-        <h2>Source Image</h2>
+        <h2>Manual Crop Review</h2>
         <div class="crop-tool">
-            <div class="crop-tool-actions">
-                <p class="panel-hint">Step 1: draw the plot crop rectangle. Step 2: draw freehand mask shapes over risk tables, summary blocks, or other unwanted areas. Step 3: check the cropped preview below, then rerun.</p>
-                <div class="artifact-links">
-                    <button type="button" id="crop-mode-button" class="btn btn-small">Crop Mode</button>
-                    <button type="button" id="polygon-mode-button" class="btn btn-small">Mask Draw Mode</button>
-                    <button type="button" id="clear-last-polygon-mask" class="btn btn-small">Undo Last Mask</button>
-                    <button type="button" id="clear-manual-crop" class="btn btn-small">Clear Manual Crop</button>
-                    <button type="button" id="clear-all-polygon-masks" class="btn btn-small">Clear All Masks</button>
-                    <button type="submit" form="manifest-review-form" name="rerun_after_save" value="true" class="btn btn-primary btn-small">Save Drawn Crop and Rerun</button>
-                </div>
+            {% if manifest.crop_hint or review_flag %}
+            <div class="crop-review-callout">
+                <strong>Manual crop check</strong>
+                <span>{{ manifest.crop_hint if manifest.crop_hint else "OpenAI flagged this image for manual crop review before extraction. Keep the full axes and labels inside the crop, then draw masks over tables or summaries." }}</span>
             </div>
-            <div class="crop-editor" id="manual-crop-editor">
-                <img src="/images/{{ image.id }}/raw" alt="{{ image.filename }}" class="image-preview crop-editor-image" id="source-image-preview">
-                <div class="crop-editor-overlay" id="crop-editor-overlay" aria-hidden="true">
-                    <svg id="crop-editor-svg" class="crop-editor-svg" preserveAspectRatio="none">
-                        <g id="polygon-mask-group"></g>
-                        <polyline id="active-polygon-mask" class="active-polygon-mask"></polyline>
-                        <rect id="crop-selection" class="crop-selection"></rect>
-                    </svg>
+            {% endif %}
+            <div class="crop-editor-shell">
+                <div class="crop-toolbar">
+                    <div class="crop-toolbar-group">
+                        <span class="toolbar-label">Tool</span>
+                        <div class="segmented-control">
+                            <button type="button" id="crop-mode-button" class="btn btn-small">Crop</button>
+                            <button type="button" id="polygon-mode-button" class="btn btn-small">Mask</button>
+                        </div>
+                    </div>
+                    <div class="crop-toolbar-group crop-toolbar-zoom">
+                        <span class="toolbar-label">Zoom</span>
+                        <div class="zoom-controls">
+                            <button type="button" id="zoom-out-button" class="btn btn-small" aria-label="Zoom out">-</button>
+                            <input type="range" id="zoom-slider" min="50" max="300" step="10" value="100" aria-label="Zoom level">
+                            <button type="button" id="zoom-in-button" class="btn btn-small" aria-label="Zoom in">+</button>
+                            <button type="button" id="zoom-fit-button" class="btn btn-small">Fit</button>
+                            <span id="zoom-readout" class="zoom-readout">100%</span>
+                        </div>
+                    </div>
+                </div>
+                <p class="panel-hint crop-workflow-hint">Draw one box around the plot panel, switch to Mask to paint around risk tables or summary blocks, and use the preview underneath to confirm the cropped image before rerunning. Zoom starts fitted to the panel and can be increased for detail work.</p>
+                <div class="crop-editor-viewport" id="crop-editor-viewport">
+                    <div class="crop-editor" id="manual-crop-editor">
+                        <div class="crop-editor-stage" id="crop-editor-stage">
+                            <img src="/images/{{ image.id }}/raw" alt="{{ image.filename }}" class="crop-editor-image" id="source-image-preview">
+                            <div class="crop-editor-overlay" id="crop-editor-overlay" aria-hidden="true">
+                                <svg id="crop-editor-svg" class="crop-editor-svg" preserveAspectRatio="none">
+                                    <g id="polygon-mask-group"></g>
+                                    <polyline id="active-polygon-mask" class="active-polygon-mask"></polyline>
+                                    <rect id="crop-selection" class="crop-selection"></rect>
+                                </svg>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="crop-editor-actions">
+                    <div class="crop-editor-utility">
+                        <button type="button" id="clear-last-polygon-mask" class="btn btn-small">Undo Mask</button>
+                        <button type="button" id="clear-manual-crop" class="btn btn-small">Reset Crop</button>
+                        <button type="button" id="clear-all-polygon-masks" class="btn btn-small">Reset Masks</button>
+                    </div>
+                    <button type="submit" form="manifest-review-form" name="rerun_after_save" value="true" class="btn btn-primary">Use Crop and Rerun</button>
                 </div>
             </div>
         </div>
         <div class="artifact-list">
-            <h3>Current Cropped Preview</h3>
-            <p class="panel-hint">This updates from your manual crop and freehand masks before rerun.</p>
+            <h3>Ready-to-Run Preview</h3>
+            <p class="panel-hint">This updates immediately from your crop and freehand masks. Use it as the final check before rerunning.</p>
             <canvas id="cropped-preview-canvas" class="image-preview cropped-preview-canvas"></canvas>
         </div>
         {% if image.review_overlay_path and image.status == "needs_review" %}
@@ -111,7 +141,6 @@
     <div class="panel">
         <h2>Manifest Review</h2>
         <form id="manifest-review-form" action="/images/{{ image.id }}/review" method="post" class="stack">
-            {% set review_flag = manifest.get('review_required') if manifest else false %}
             <div class="grid-two">
                 <label>
                     <span>Number of Curves</span>

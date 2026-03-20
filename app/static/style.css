@@ -268,17 +268,101 @@ td {
     gap: 0.9rem;
 }
 
-.crop-tool-actions {
+.crop-review-callout {
     display: grid;
-    gap: 0.6rem;
+    gap: 0.25rem;
+    padding: 0.95rem 1rem;
+    border: 1px solid #bfdbfe;
+    border-radius: 14px;
+    background: #eff6ff;
+}
+
+.crop-editor-shell {
+    display: grid;
+    gap: 0.9rem;
+}
+
+.crop-toolbar {
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: 0.9rem;
+    flex-wrap: wrap;
+}
+
+.crop-toolbar-group {
+    display: grid;
+    gap: 0.45rem;
+}
+
+.toolbar-label {
+    color: var(--muted);
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.segmented-control,
+.zoom-controls,
+.crop-editor-actions,
+.crop-editor-utility {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    flex-wrap: wrap;
+}
+
+.crop-toolbar .btn-small {
+    min-width: 72px;
+}
+
+.zoom-controls input[type="range"] {
+    width: 180px;
+    padding: 0;
+}
+
+.zoom-readout {
+    min-width: 3.5rem;
+    font-weight: 700;
+    text-align: right;
+}
+
+.crop-workflow-hint {
+    margin: 0;
+}
+
+.crop-editor-viewport {
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.98)),
+        linear-gradient(90deg, rgba(15, 118, 110, 0.04) 1px, transparent 1px),
+        linear-gradient(rgba(15, 118, 110, 0.04) 1px, transparent 1px);
+    background-size: auto, 24px 24px, 24px 24px;
+    overflow: auto;
+    max-height: 620px;
+    padding: 0.75rem;
 }
 
 .crop-editor {
+    display: flex;
+    justify-content: center;
+    min-height: 260px;
+}
+
+.crop-editor-stage {
     position: relative;
+    flex: 0 0 auto;
 }
 
 .crop-editor-image {
     display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: #fff;
 }
 
 .crop-editor-overlay {
@@ -324,6 +408,14 @@ td {
 .btn-small[data-active="true"] {
     background: #bfdbfe;
     color: #1d4ed8;
+}
+
+.crop-editor-actions {
+    justify-content: space-between;
+}
+
+.crop-editor-utility .btn-small {
+    min-width: 0;
 }
 
 .warning-box {
@@ -408,6 +500,12 @@ td {
 .artifact-list h3 {
     margin: 0 0 0.75rem;
     font-size: 1rem;
+}
+
+.cropped-preview-canvas {
+    display: block;
+    max-height: 380px;
+    object-fit: contain;
 }
 
 .artifact-links {
@@ -571,5 +669,18 @@ td {
 
     .suggested-crop-card {
         flex-direction: column;
+    }
+
+    .crop-toolbar,
+    .crop-editor-actions {
+        align-items: stretch;
+    }
+
+    .zoom-controls input[type="range"] {
+        width: 100%;
+    }
+
+    .crop-editor-viewport {
+        max-height: 480px;
     }
 }

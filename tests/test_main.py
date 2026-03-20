@@ -249,6 +249,42 @@ class MainFlowTests(unittest.TestCase):
         self.assertEqual(len(image["manifest"]["exclusion_regions"]), 1)
         self.assertEqual(len(image["manifest"]["exclusion_polygons"]), 1)
 
+    def test_image_review_page_shows_zoomable_manual_crop_controls(self) -> None:
+        manifest = ImageManifest(
+            image_id=self.image_id,
+            filename="test.png",
+            num_curves=2,
+            x_start=0,
+            x_end=60,
+            x_increment=5,
+            y_start=0,
+            y_end=100,
+            y_increment=25,
+            y_text_vertical=True,
+            rotation=0,
+            crop_hint="manual crop recommended: exclude risk table below x-axis",
+            notes="ui-smoke",
+            llm_confidence=0.52,
+            review_required=True,
+        )
+        update_image(
+            self.settings,
+            self.image_id,
+            manifest_json=serialize_manifest(manifest.model_dump()),
+            review_required=1,
+            status="needs_review",
+        )
+
+        with TestClient(main.app) as client:
+            response = client.get(f"/images/{self.image_id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Manual Crop Review", response.text)
+        self.assertIn("Use Crop and Rerun", response.text)
+        self.assertIn("Zoom", response.text)
+        self.assertIn("manual crop recommended", response.text)
+        self.assertIn("zoom-slider", response.text)
+
     def test_process_single_image_logs_review_pause(self) -> None:
         manifest = ImageManifest(
             image_id=self.image_id,

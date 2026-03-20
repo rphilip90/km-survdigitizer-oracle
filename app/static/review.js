@@ -9,6 +9,8 @@
 
     function initManualCrop() {
         const image = document.getElementById("source-image-preview");
+        const stage = document.getElementById("crop-editor-stage");
+        const viewport = document.getElementById("crop-editor-viewport");
         const overlay = document.getElementById("crop-editor-overlay");
         const svg = document.getElementById("crop-editor-svg");
         const selection = document.getElementById("crop-selection");
@@ -21,6 +23,11 @@
         const clearLastPolygonButton = document.getElementById("clear-last-polygon-mask");
         const clearAllPolygonsButton = document.getElementById("clear-all-polygon-masks");
         const polygonField = document.getElementById("exclusion-polygons-input");
+        const zoomOutButton = document.getElementById("zoom-out-button");
+        const zoomInButton = document.getElementById("zoom-in-button");
+        const zoomFitButton = document.getElementById("zoom-fit-button");
+        const zoomSlider = document.getElementById("zoom-slider");
+        const zoomReadout = document.getElementById("zoom-readout");
         const inputs = {
             left: document.getElementById("crop-left-input"),
             top: document.getElementById("crop-top-input"),
@@ -29,10 +36,11 @@
         };
 
         if (
-            !image || !overlay || !svg || !selection || !polygonGroup || !activePolygon ||
-            !previewCanvas || !clearCropButton || !cropModeButton || !polygonModeButton ||
-            !clearLastPolygonButton || !clearAllPolygonsButton ||
-            !polygonField || Object.values(inputs).some((input) => !input)
+            !image || !stage || !viewport || !overlay || !svg || !selection || !polygonGroup ||
+            !activePolygon || !previewCanvas || !clearCropButton || !cropModeButton ||
+            !polygonModeButton || !clearLastPolygonButton || !clearAllPolygonsButton ||
+            !polygonField || !zoomOutButton || !zoomInButton || !zoomFitButton ||
+            !zoomSlider || !zoomReadout || Object.values(inputs).some(function (input) { return !input; })
         ) {
             return;
         }
@@ -41,6 +49,8 @@
         let dragState = null;
         let activePolygonPoints = [];
         let drawState = null;
+        let zoomPercent = Number(zoomSlider.value) || 100;
+        let fitScale = 1;
         let polygons = parsePolygons();
 
         function parsePolygons() {
@@ -60,10 +70,25 @@
             return overlay.getBoundingClientRect();
         }
 
+        function computeFitScale() {
+            if (!image.naturalWidth || !image.naturalHeight) {
+                return 1;
+            }
+            const widthScale = Math.max(0.1, (viewport.clientWidth - 8) / image.naturalWidth);
+            const heightScale = Math.max(0.1, (viewport.clientHeight - 8) / image.naturalHeight);
+            return Math.max(0.1, Math.min(widthScale, heightScale));
+        }
+
+        function updateZoomReadout() {
+            zoomReadout.textContent = Math.round(zoomPercent) + "%";
+        }
+
         function setMode(nextMode) {
             mode = nextMode;
             cropModeButton.dataset.active = String(mode === "crop");
             polygonModeButton.dataset.active = String(mode === "polygon");
+            cropModeButton.setAttribute("aria-pressed", String(mode === "crop"));
+            polygonModeButton.setAttribute("aria-pressed", String(mode === "polygon"));
             overlay.dataset.mode = mode;
             clearLastPolygonButton.disabled = polygons.length === 0 && activePolygonPoints.length === 0;
             clearAllPolygonsButton.disabled = polygons.length === 0;
@@ -72,7 +97,6 @@
         function clearActivePolygon() {
             activePolygonPoints = [];
             activePolygon.setAttribute("points", "");
-            finishPolygonButton.disabled = true;
         }
 
         function pointPosition(event) {
@@ -117,7 +141,7 @@
             const rightValue = parseFloat(inputs.right.value);
             const bottomValue = parseFloat(inputs.bottom.value);
 
-            if ([leftValue, topValue, rightValue, bottomValue].some((value) => Number.isNaN(value))) {
+            if ([leftValue, topValue, rightValue, bottomValue].some(function (value) { return Number.isNaN(value); })) {
                 hideSelection();
                 return;
             }
@@ -164,6 +188,54 @@
             renderPreview();
         }
 
+        function applyZoom(options) {
+            if (!image.naturalWidth || !image.naturalHeight) {
+                return;
+            }
+
+            const oldWidth = stage.clientWidth || image.clientWidth || 1;
+            const oldHeight = stage.clientHeight || image.clientHeight || 1;
+            let centerRatioX = 0.5;
+            let centerRatioY = 0.5;
+
+            if (options && options.preserveCenter) {
+                centerRatioX = clamp((viewport.scrollLeft + (viewport.clientWidth / 2)) / oldWidth, 0, 1);
+                centerRatioY = clamp((viewport.scrollTop + (viewport.clientHeight / 2)) / oldHeight, 0, 1);
+            }
+
+            fitScale = computeFitScale();
+            const displayScale = fitScale * (zoomPercent / 100);
+            const width = Math.max(240, Math.round(image.naturalWidth * displayScale));
+            const height = Math.max(180, Math.round(image.naturalHeight * displayScale));
+
+            stage.style.width = width + "px";
+            stage.style.height = height + "px";
+            image.style.width = width + "px";
+            image.style.height = height + "px";
+            overlay.style.width = width + "px";
+            overlay.style.height = height + "px";
+            svg.setAttribute("viewBox", "0 0 " + width + " " + height);
+            svg.setAttribute("width", String(width));
+            svg.setAttribute("height", String(height));
+            updateZoomReadout();
+
+            window.requestAnimationFrame(function () {
+                syncCropFromInputs();
+                renderPolygons();
+
+                if (options && options.preserveCenter) {
+                    viewport.scrollLeft = clamp((centerRatioX * width) - (viewport.clientWidth / 2), 0, Math.max(0, width - viewport.clientWidth));
+                    viewport.scrollTop = clamp((centerRatioY * height) - (viewport.clientHeight / 2), 0, Math.max(0, height - viewport.clientHeight));
+                }
+            });
+        }
+
+        function setZoom(nextZoom, options) {
+            zoomPercent = clamp(nextZoom, Number(zoomSlider.min) || 50, Number(zoomSlider.max) || 300);
+            zoomSlider.value = String(Math.round(zoomPercent));
+            applyZoom(options);
+        }
+
         svg.addEventListener("pointerdown", function (event) {
             if (mode === "crop") {
                 const start = pointPosition(event);
@@ -173,6 +245,7 @@
                 event.preventDefault();
                 return;
             }
+
             if (mode === "polygon") {
                 const start = pointPosition(event);
                 drawState = { points: [start] };
@@ -193,6 +266,7 @@
                 setSelection(left, top, right, bottom);
                 return;
             }
+
             if (mode === "polygon" && drawState) {
                 const current = pointPosition(event);
                 const lastPoint = drawState.points[drawState.points.length - 1];
@@ -209,6 +283,7 @@
             if (mode !== "crop" || !dragState) {
                 return;
             }
+
             const current = pointPosition(event);
             const left = Math.min(dragState.startX, current.x);
             const top = Math.min(dragState.startY, current.y);
@@ -287,6 +362,32 @@
             renderPreview();
         });
 
+        zoomOutButton.addEventListener("click", function () {
+            setZoom(zoomPercent - 20, { preserveCenter: true });
+        });
+
+        zoomInButton.addEventListener("click", function () {
+            setZoom(zoomPercent + 20, { preserveCenter: true });
+        });
+
+        zoomFitButton.addEventListener("click", function () {
+            setZoom(100);
+            viewport.scrollLeft = 0;
+            viewport.scrollTop = 0;
+        });
+
+        zoomSlider.addEventListener("input", function () {
+            setZoom(Number(zoomSlider.value) || 100, { preserveCenter: true });
+        });
+
+        viewport.addEventListener("wheel", function (event) {
+            if (!event.ctrlKey && !event.metaKey) {
+                return;
+            }
+            event.preventDefault();
+            setZoom(zoomPercent + (event.deltaY < 0 ? 10 : -10), { preserveCenter: true });
+        }, { passive: false });
+
         polygonField.addEventListener("input", function () {
             polygons = parsePolygons();
             clearActivePolygon();
@@ -301,16 +402,15 @@
         });
 
         window.addEventListener("resize", function () {
-            syncCropFromInputs();
-            renderPolygons();
+            applyZoom();
         });
+
         image.addEventListener("load", function () {
-            syncCropFromInputs();
-            renderPolygons();
+            applyZoom();
         });
 
         syncCropFromInputs();
-        renderPolygons();
+        applyZoom();
         setMode("crop");
 
         function renderPreview() {
@@ -324,7 +424,7 @@
             const rightValue = parseFloat(inputs.right.value);
             const bottomValue = parseFloat(inputs.bottom.value);
 
-            const hasCrop = ![leftValue, topValue, rightValue, bottomValue].some((value) => Number.isNaN(value));
+            const hasCrop = ![leftValue, topValue, rightValue, bottomValue].some(function (value) { return Number.isNaN(value); });
             const sourceWidth = image.naturalWidth;
             const sourceHeight = image.naturalHeight;
 
