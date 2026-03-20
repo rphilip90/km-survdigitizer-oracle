@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 
 {% block content %}
+{% set manifest = image.manifest or {} %}
+{% set has_suggested_crop = manifest and ((manifest.get('crop_left') is not none) or (manifest.get('exclusion_regions') and manifest.get('exclusion_regions')|length > 0) or manifest.get('crop_hint')) %}
 <section class="panel">
     <div class="section-head">
         <div>
@@ -44,6 +46,27 @@
         <div class="artifact-list">
             <h3>Manual Review Grid Preview</h3>
             <p class="panel-hint">Detected plot bounds plus the current manifest range, increment, and exclusion masks. Save review to rerun pre-flight and refresh it after editing the fields.</p>
+            {% if has_suggested_crop %}
+            <div class="suggested-crop-card">
+                <div>
+                    <strong>Suggested crop and masks</strong>
+                    <p>
+                        Crop chosen to preserve full axes and labels.
+                        {% if manifest.get('crop_hint') %}
+                        {{ manifest.get('crop_hint') }}.
+                        {% endif %}
+                        {% if manifest.get('notes') %}
+                        {{ manifest.get('notes') }}
+                        {% else %}
+                        Crop and mask bounds were estimated from the image and should be reviewed before rerun.
+                        {% endif %}
+                    </p>
+                </div>
+                <button form="manifest-review-form" type="submit" name="approve_crop" value="true" class="btn btn-primary">
+                    Approve Suggested Crop and Rerun
+                </button>
+            </div>
+            {% endif %}
             <img src="/images/{{ image.id }}/artifact/review" alt="{{ image.filename }} review grid preview" class="image-preview">
         </div>
         {% endif %}
@@ -82,9 +105,8 @@
 
     <div class="panel">
         <h2>Manifest Review</h2>
-        <form action="/images/{{ image.id }}/review" method="post" class="stack">
-            {% set manifest = image.manifest or {} %}
-            {% set review_flag = manifest.review_required if manifest else false %}
+        <form id="manifest-review-form" action="/images/{{ image.id }}/review" method="post" class="stack">
+            {% set review_flag = manifest.get('review_required') if manifest else false %}
             <div class="grid-two">
                 <label>
                     <span>Number of Curves</span>
@@ -175,6 +197,9 @@
             <div class="form-actions">
                 <button type="submit" class="btn btn-secondary">Save Review</button>
                 <button type="submit" name="rerun_after_save" value="true" class="btn btn-primary">Save Review and Rerun</button>
+                {% if has_suggested_crop %}
+                <button type="submit" name="approve_crop" value="true" class="btn btn-secondary">Approve Suggested Crop</button>
+                {% endif %}
             </div>
         </form>
     </div>

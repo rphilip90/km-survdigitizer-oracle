@@ -117,6 +117,57 @@ class MainFlowTests(unittest.TestCase):
         self.assertEqual(len(self.fake_executor.calls), 1)
         self.assertEqual(self.fake_executor.calls[0][0], main.process_single_image)
 
+    def test_approve_crop_button_clears_review_and_reruns(self) -> None:
+        preflight_result = self.make_preflight_result()
+        with (
+            TestClient(main.app) as client,
+            mock.patch.object(main, "ensure_preflight_preview", return_value=preflight_result),
+        ):
+            response = client.post(
+                f"/images/{self.image_id}/review",
+                data={
+                    "num_curves": 2,
+                    "llm_confidence": 0.4,
+                    "x_start": 0,
+                    "x_end": 60,
+                    "x_increment": 10,
+                    "y_start": 0,
+                    "y_end": 100,
+                    "y_increment": 25,
+                    "y_text_vertical": "true",
+                    "rotation": 0,
+                    "crop_left": "0.12",
+                    "crop_top": "0.10",
+                    "crop_right": "0.94",
+                    "crop_bottom": "0.88",
+                    "exclusion_regions_json": json.dumps(
+                        [
+                            {
+                                "left": 0.62,
+                                "top": 0.03,
+                                "right": 0.98,
+                                "bottom": 0.20,
+                                "label": "top summary",
+                            }
+                        ]
+                    ),
+                    "crop_hint": "exclude risk table and top summary",
+                    "notes": "approve-crop",
+                    "review_required": "on",
+                    "approve_crop": "true",
+                },
+                follow_redirects=False,
+            )
+
+        self.assertEqual(response.status_code, 303)
+        image = get_image(self.settings, self.image_id)
+        self.assertFalse(image["review_required"])
+        self.assertEqual(image["status"], "queued")
+        self.assertAlmostEqual(image["manifest"]["crop_left"], 0.12)
+        self.assertEqual(len(self.fake_executor.calls), 1)
+        stages = [entry["stage"] for entry in image["processing_log"]]
+        self.assertIn("crop_approved", stages)
+
     def test_save_review_generates_preview_when_image_stays_in_review(self) -> None:
         preflight_result = self.make_preflight_result()
 

@@ -208,6 +208,7 @@ async def save_review(
     llm_confidence: float = Form(default=1.0),
     review_required: str | None = Form(default=None),
     rerun_after_save: str | None = Form(default=None),
+    approve_crop: str | None = Form(default=None),
 ):
     image = get_image(settings, image_id)
     if not image:
@@ -215,8 +216,9 @@ async def save_review(
     batch = get_batch(settings, image["batch_id"])
     threshold = batch.get("auto_approve_threshold", settings.auto_approve_threshold) if batch else settings.auto_approve_threshold
 
-    rerun_requested = rerun_after_save == "true"
-    keep_in_review = review_required == "on" and not rerun_requested
+    crop_approved = approve_crop == "true"
+    rerun_requested = rerun_after_save == "true" or crop_approved
+    keep_in_review = False if crop_approved else (review_required == "on" and not rerun_requested)
 
     manifest = ImageManifest(
         image_id=image["id"],
@@ -268,9 +270,13 @@ async def save_review(
         append_image_log(
             settings,
             image_id,
-            "review_saved",
+            "crop_approved" if crop_approved else "review_saved",
             (
-                "Review saved and image queued for digitization."
+                "Suggested crop and masks were approved and the image was queued for digitization."
+                if crop_approved and rerun_requested and not saved_manifest.review_required
+                else "Suggested crop approval was saved, but pre-flight still requires manual review."
+                if crop_approved
+                else "Review saved and image queued for digitization."
                 if rerun_requested and not saved_manifest.review_required
                 else "Review saved; image remains paused for manual review."
             ),
