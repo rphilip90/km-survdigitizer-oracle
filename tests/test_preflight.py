@@ -77,6 +77,29 @@ class PreflightReportTests(unittest.TestCase):
         self.assertTrue(report.blocking)
         self.assertTrue(any(check.id == "manifest-exclusions" and check.status == "fail" for check in report.checks))
 
+    def test_blocks_when_exclusion_polygon_covers_axis_zone(self) -> None:
+        manifest = ImageManifest.model_validate(
+            {
+                **self.manifest.model_dump(),
+                "exclusion_polygons": [
+                    {
+                        "label": "risk table polygon",
+                        "points": [
+                            {"x": 0.12, "y": 0.76},
+                            {"x": 0.84, "y": 0.78},
+                            {"x": 0.84, "y": 0.89},
+                            {"x": 0.12, "y": 0.89},
+                        ],
+                    }
+                ],
+            }
+        )
+
+        report = build_preflight_report(manifest, self.prepared_path, self.base_payload)
+
+        self.assertTrue(report.blocking)
+        self.assertTrue(any(check.id == "manifest-exclusions" and check.status == "fail" for check in report.checks))
+
     def test_blocks_on_collapsed_axis_geometry(self) -> None:
         payload = {
             **self.base_payload,

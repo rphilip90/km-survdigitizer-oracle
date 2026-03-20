@@ -222,6 +222,18 @@ class MainFlowTests(unittest.TestCase):
                     ),
                     "crop_hint": "",
                     "notes": "preview-test",
+                    "exclusion_polygons_json": json.dumps(
+                        [
+                            {
+                                "label": "manual polygon 1",
+                                "points": [
+                                    {"x": 0.70, "y": 0.15},
+                                    {"x": 0.88, "y": 0.12},
+                                    {"x": 0.90, "y": 0.24},
+                                ],
+                            }
+                        ]
+                    ),
                     "review_required": "on",
                 },
                 follow_redirects=False,
@@ -235,6 +247,7 @@ class MainFlowTests(unittest.TestCase):
         self.assertAlmostEqual(image["manifest"]["crop_left"], 0.15)
         self.assertAlmostEqual(image["manifest"]["crop_bottom"], 0.82)
         self.assertEqual(len(image["manifest"]["exclusion_regions"]), 1)
+        self.assertEqual(len(image["manifest"]["exclusion_polygons"]), 1)
 
     def test_process_single_image_logs_review_pause(self) -> None:
         manifest = ImageManifest(

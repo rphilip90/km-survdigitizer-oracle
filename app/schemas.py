@@ -97,6 +97,7 @@ class ImageManifest(BaseModel):
     crop_right: float | None = None
     crop_bottom: float | None = None
     exclusion_regions: list["ExclusionRegion"] = Field(default_factory=list)
+    exclusion_polygons: list["ExclusionPolygon"] = Field(default_factory=list)
     crop_hint: str | None = None
     notes: str | None = None
     llm_confidence: float = Field(ge=0, le=1)
@@ -180,6 +181,16 @@ class ExclusionRegion(BaseModel):
         if self.bottom <= self.top:
             raise ValueError("exclusion region bottom must be greater than top")
         return self
+
+
+class ExclusionPoint(BaseModel):
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+
+
+class ExclusionPolygon(BaseModel):
+    points: list[ExclusionPoint] = Field(min_length=3)
+    label: str | None = None
 
 
 class PreflightCheck(BaseModel):

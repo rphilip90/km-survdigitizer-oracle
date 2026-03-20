@@ -54,14 +54,14 @@ class DigitizerRunner:
             value is not None
             for value in [manifest.crop_left, manifest.crop_top, manifest.crop_right, manifest.crop_bottom]
         )
-        has_exclusions = bool(manifest.exclusion_regions)
+        has_exclusions = bool(manifest.exclusion_regions or manifest.exclusion_polygons)
         if rotation == 0 and not has_crop and not has_exclusions:
             shutil.copy2(image_path, prepared_path)
             return prepared_path
 
         with Image.open(image_path) as image:
             working_image = image.copy()
-            if manifest.exclusion_regions:
+            if manifest.exclusion_regions or manifest.exclusion_polygons:
                 fill_color = self._estimate_background_fill(working_image)
                 mask_draw = ImageDraw.Draw(working_image)
                 width, height = working_image.size
@@ -71,6 +71,9 @@ class DigitizerRunner:
                     right = int(width * region.right)
                     bottom = int(height * region.bottom)
                     mask_draw.rectangle((left, top, right, bottom), fill=fill_color)
+                for polygon in manifest.exclusion_polygons:
+                    points = [(width * point.x, height * point.y) for point in polygon.points]
+                    mask_draw.polygon(points, fill=fill_color)
 
             if has_crop:
                 width, height = working_image.size
@@ -385,6 +388,15 @@ class DigitizerRunner:
         )
         for box in exclusion_boxes:
             draw.rectangle(box["bounds"], fill=REVIEW_MASK_FILL, outline=REVIEW_MASK_OUTLINE, width=2)
+        exclusion_polygons = self._project_exclusion_polygons(
+            manifest=manifest,
+            source_width=source_width,
+            source_height=source_height,
+            prepared_width=width,
+            prepared_height=height,
+        )
+        for polygon in exclusion_polygons:
+            draw.polygon(polygon["points"], fill=REVIEW_MASK_FILL, outline=REVIEW_MASK_OUTLINE)
 
         if plot and right > left and bottom > top:
             tick_values_x = self._generate_tick_values(manifest.x_start, manifest.x_end, manifest.x_increment)
@@ -409,7 +421,7 @@ class DigitizerRunner:
             top,
             manifest,
             preview_payload.get("stage_errors") or [],
-            exclusion_boxes,
+            [*exclusion_boxes, *exclusion_polygons],
         )
 
         output_review_overlay_path.parent.mkdir(parents=True, exist_ok=True)
@@ -613,6 +625,65 @@ class DigitizerRunner:
                 }
             )
         return boxes
+
+    def _project_exclusion_polygons(
+        self,
+        manifest: ImageManifest,
+        source_width: int,
+        source_height: int,
+        prepared_width: int,
+        prepared_height: int,
+    ) -> list[dict]:
+        if not manifest.exclusion_polygons:
+            return []
+
+        crop_left = manifest.crop_left if manifest.crop_left is not None else 0.0
+        crop_top = manifest.crop_top if manifest.crop_top is not None else 0.0
+        crop_right = manifest.crop_right if manifest.crop_right is not None else 1.0
+        crop_bottom = manifest.crop_bottom if manifest.crop_bottom is not None else 1.0
+
+        crop_x0 = source_width * crop_left
+        crop_y0 = source_height * crop_top
+        crop_x1 = source_width * crop_right
+        crop_y1 = source_height * crop_bottom
+        crop_width = crop_x1 - crop_x0
+        crop_height = crop_y1 - crop_y0
+
+        if crop_width <= 0 or crop_height <= 0:
+            return []
+
+        polygons: list[dict] = []
+        for polygon in manifest.exclusion_polygons:
+            rotated_points: list[tuple[float, float]] = []
+            for point in polygon.points:
+                point_x = source_width * point.x
+                point_y = source_height * point.y
+                if point_x < crop_x0 or point_x > crop_x1 or point_y < crop_y0 or point_y > crop_y1:
+                    continue
+                rotated_points.append(
+                    self._rotate_point(
+                        point_x - crop_x0,
+                        point_y - crop_y0,
+                        crop_width,
+                        crop_height,
+                        manifest.rotation or 0,
+                    )
+                )
+            if len(rotated_points) < 3:
+                continue
+            polygons.append(
+                {
+                    "label": polygon.label or "mask",
+                    "points": [
+                        (
+                            self._clamp(point[0], 0, prepared_width - 1),
+                            self._clamp(point[1], 0, prepared_height - 1),
+                        )
+                        for point in rotated_points
+                    ],
+                }
+            )
+        return polygons
 
     @staticmethod
     def _rotate_point(x_coord: float, y_coord: float, width: float, height: float, rotation: int) -> tuple[float, float]:

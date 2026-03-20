@@ -41,7 +41,30 @@
 <section class="two-col">
     <div class="panel image-panel">
         <h2>Source Image</h2>
-        <img src="/images/{{ image.id }}/raw" alt="{{ image.filename }}" class="image-preview">
+        <div class="crop-tool">
+            <div class="crop-tool-actions">
+                <p class="panel-hint">Use crop mode to drag a rectangular plot crop. Switch to polygon mask mode to draw irregular excluded areas over tables or summary blocks.</p>
+                <div class="artifact-links">
+                    <button type="button" id="crop-mode-button" class="btn btn-small">Crop Mode</button>
+                    <button type="button" id="polygon-mode-button" class="btn btn-small">Polygon Mask Mode</button>
+                    <button type="button" id="finish-polygon-mask" class="btn btn-small">Finish Polygon</button>
+                    <button type="button" id="clear-last-polygon-mask" class="btn btn-small">Undo Polygon</button>
+                    <button type="button" id="clear-manual-crop" class="btn btn-small">Clear Manual Crop</button>
+                    <button type="button" id="clear-all-polygon-masks" class="btn btn-small">Clear Polygon Masks</button>
+                    <button type="submit" form="manifest-review-form" name="rerun_after_save" value="true" class="btn btn-primary btn-small">Save Drawn Crop and Rerun</button>
+                </div>
+            </div>
+            <div class="crop-editor" id="manual-crop-editor">
+                <img src="/images/{{ image.id }}/raw" alt="{{ image.filename }}" class="image-preview crop-editor-image" id="source-image-preview">
+                <div class="crop-editor-overlay" id="crop-editor-overlay" aria-hidden="true">
+                    <svg id="crop-editor-svg" class="crop-editor-svg" preserveAspectRatio="none">
+                        <g id="polygon-mask-group"></g>
+                        <polyline id="active-polygon-mask" class="active-polygon-mask"></polyline>
+                        <rect id="crop-selection" class="crop-selection"></rect>
+                    </svg>
+                </div>
+            </div>
+        </div>
         {% if image.review_overlay_path and image.status == "needs_review" %}
         <div class="artifact-list">
             <h3>Manual Review Grid Preview</h3>
@@ -161,19 +184,19 @@
                 </label>
                 <label>
                     <span>Crop Left</span>
-                    <input type="number" name="crop_left" min="0" max="1" step="0.001" value="{{ manifest.crop_left if manifest and manifest.crop_left is not none else '' }}">
+                    <input id="crop-left-input" type="number" name="crop_left" min="0" max="1" step="0.001" value="{{ manifest.crop_left if manifest and manifest.crop_left is not none else '' }}">
                 </label>
                 <label>
                     <span>Crop Top</span>
-                    <input type="number" name="crop_top" min="0" max="1" step="0.001" value="{{ manifest.crop_top if manifest and manifest.crop_top is not none else '' }}">
+                    <input id="crop-top-input" type="number" name="crop_top" min="0" max="1" step="0.001" value="{{ manifest.crop_top if manifest and manifest.crop_top is not none else '' }}">
                 </label>
                 <label>
                     <span>Crop Right</span>
-                    <input type="number" name="crop_right" min="0" max="1" step="0.001" value="{{ manifest.crop_right if manifest and manifest.crop_right is not none else '' }}">
+                    <input id="crop-right-input" type="number" name="crop_right" min="0" max="1" step="0.001" value="{{ manifest.crop_right if manifest and manifest.crop_right is not none else '' }}">
                 </label>
                 <label>
                     <span>Crop Bottom</span>
-                    <input type="number" name="crop_bottom" min="0" max="1" step="0.001" value="{{ manifest.crop_bottom if manifest and manifest.crop_bottom is not none else '' }}">
+                    <input id="crop-bottom-input" type="number" name="crop_bottom" min="0" max="1" step="0.001" value="{{ manifest.crop_bottom if manifest and manifest.crop_bottom is not none else '' }}">
                 </label>
             </div>
             <label>
@@ -186,6 +209,11 @@
                 <textarea name="exclusion_regions_json" rows="5" placeholder='[{"left":0.62,"top":0.02,"right":0.98,"bottom":0.22,"label":"top summary"}]'>{{ manifest.exclusion_regions | tojson(indent=2) if manifest and manifest.exclusion_regions else '[]' }}</textarea>
             </label>
             <p class="panel-hint">Use exclusion regions to blank out risk tables, hazard-ratio blocks, legends, or other non-plot content while preserving the full axes and tick marks.</p>
+            <label>
+                <span>Exclusion Polygons JSON</span>
+                <textarea id="exclusion-polygons-input" name="exclusion_polygons_json" rows="5" placeholder='[{"label":"manual mask 1","points":[{"x":0.62,"y":0.02},{"x":0.96,"y":0.02},{"x":0.88,"y":0.20}]}]'>{{ manifest.exclusion_polygons | tojson(indent=2) if manifest and manifest.exclusion_polygons else '[]' }}</textarea>
+            </label>
+            <p class="panel-hint">Polygon masks let you draw irregular excluded shapes. These are applied before the crop is rerun.</p>
             <label>
                 <span>Notes</span>
                 <textarea name="notes" rows="4" placeholder="Reasons for review or manual changes">{{ manifest.notes if manifest and manifest.notes else '' }}</textarea>
@@ -270,4 +298,5 @@ window.setTimeout(function () {
 }, 5000);
 </script>
 {% endif %}
+<script src="{{ url_for('static', path='/review.js') }}"></script>
 {% endblock %}

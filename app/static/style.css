@@ -263,6 +263,69 @@ td {
     background: #fff;
 }
 
+.crop-tool {
+    display: grid;
+    gap: 0.9rem;
+}
+
+.crop-tool-actions {
+    display: grid;
+    gap: 0.6rem;
+}
+
+.crop-editor {
+    position: relative;
+}
+
+.crop-editor-image {
+    display: block;
+}
+
+.crop-editor-overlay {
+    position: absolute;
+    inset: 0;
+}
+
+.crop-editor-overlay[data-mode="crop"] {
+    cursor: crosshair;
+}
+
+.crop-editor-overlay[data-mode="polygon"] {
+    cursor: cell;
+}
+
+.crop-editor-svg {
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+}
+
+.crop-selection {
+    display: none;
+    fill: rgba(249, 115, 22, 0.18);
+    stroke: rgba(249, 115, 22, 0.95);
+    stroke-width: 2;
+    stroke-dasharray: 8 4;
+}
+
+.saved-polygon-mask {
+    fill: rgba(239, 68, 68, 0.18);
+    stroke: rgba(220, 38, 38, 0.95);
+    stroke-width: 2;
+}
+
+.active-polygon-mask {
+    fill: rgba(59, 130, 246, 0.14);
+    stroke: rgba(37, 99, 235, 0.95);
+    stroke-width: 2;
+    stroke-dasharray: 6 4;
+}
+
+.btn-small[data-active="true"] {
+    background: #bfdbfe;
+    color: #1d4ed8;
+}
+
 .warning-box {
     margin-top: 0.75rem;
     padding: 0.9rem 1rem;

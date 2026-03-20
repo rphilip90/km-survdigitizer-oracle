@@ -37,6 +37,7 @@ def build_preflight_report(
     metrics["expected_y_ticks"] = _expected_tick_count(manifest.y_start, manifest.y_end, manifest.y_increment)
     metrics["mask_coverage_ratio"] = round(_estimate_mask_coverage_ratio(manifest), 4)
     metrics["exclusion_region_count"] = len(manifest.exclusion_regions)
+    metrics["exclusion_polygon_count"] = len(manifest.exclusion_polygons)
     metrics["crop_area_ratio"] = round(_estimate_crop_area_ratio(manifest), 4)
 
     checks: list[PreflightCheck] = []
@@ -158,7 +159,10 @@ def _build_manifest_checks(manifest: ImageManifest, metrics: dict) -> list[Prefl
                 "manifest_preflight",
                 "pass",
                 "Exclusion regions stay clear of the likely axis guard bands.",
-                evidence={"mask_coverage_ratio": metrics["mask_coverage_ratio"]},
+                evidence={
+                    "mask_coverage_ratio": metrics["mask_coverage_ratio"],
+                    "exclusion_polygons": metrics["exclusion_polygon_count"],
+                },
             )
         )
 
@@ -573,11 +577,14 @@ def _estimate_mask_coverage_ratio(manifest: ImageManifest) -> float:
         if right <= left or bottom <= top:
             continue
         masked_area += (right - left) * (bottom - top)
+    for polygon in manifest.exclusion_polygons:
+        polygon_area = _polygon_area(polygon.points)
+        masked_area += polygon_area
     return min(1.0, masked_area / crop_area)
 
 
 def _axis_guard_overlap(manifest: ImageManifest) -> dict[str, float | bool]:
-    if not manifest.exclusion_regions:
+    if not manifest.exclusion_regions and not manifest.exclusion_polygons:
         return {"blocking": False, "warning": False, "left_overlap": 0.0, "bottom_overlap": 0.0}
 
     if manifest.rotation not in (None, 0):
@@ -613,6 +620,24 @@ def _axis_guard_overlap(manifest: ImageManifest) -> dict[str, float | bool]:
         left_overlap = max(left_overlap, max(0.0, min(rel_right, left_guard) - rel_left))
         bottom_overlap = max(bottom_overlap, max(0.0, rel_bottom - max(rel_top, 1 - bottom_guard)))
 
+    for polygon in manifest.exclusion_polygons:
+        x_values = [point.x for point in polygon.points]
+        y_values = [point.y for point in polygon.points]
+        left = max(crop_left, min(x_values))
+        top = max(crop_top, min(y_values))
+        right = min(crop_right, max(x_values))
+        bottom = min(crop_bottom, max(y_values))
+        if right <= left or bottom <= top:
+            continue
+
+        rel_left = (left - crop_left) / crop_width
+        rel_right = (right - crop_left) / crop_width
+        rel_top = (top - crop_top) / crop_height
+        rel_bottom = (bottom - crop_top) / crop_height
+
+        left_overlap = max(left_overlap, max(0.0, min(rel_right, left_guard) - rel_left))
+        bottom_overlap = max(bottom_overlap, max(0.0, rel_bottom - max(rel_top, 1 - bottom_guard)))
+
     blocking = left_overlap >= 0.05 or bottom_overlap >= 0.05
     warning = not blocking and (left_overlap > 0 or bottom_overlap > 0)
     return {
@@ -634,3 +659,13 @@ def _safe_ratio(numerator: int, denominator: int) -> float | None:
     if denominator <= 0:
         return None
     return numerator / denominator
+
+
+def _polygon_area(points) -> float:
+    if len(points) < 3:
+        return 0.0
+    area = 0.0
+    for index, point in enumerate(points):
+        next_point = points[(index + 1) % len(points)]
+        area += (point.x * next_point.y) - (next_point.x * point.y)
+    return abs(area) / 2.0

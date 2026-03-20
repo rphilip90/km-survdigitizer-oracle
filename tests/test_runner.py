@@ -93,6 +93,34 @@ class RunnerTests(unittest.TestCase):
         with Image.open(prepared_path) as prepared_image:
             self.assertNotEqual(prepared_image.getpixel((80, 10)), (0, 0, 0))
 
+    def test_prepare_image_masks_exclusion_polygons(self) -> None:
+        runner = DigitizerRunner(self.settings)
+        polygon_image_path = self.root / "polygon-source.png"
+        image = Image.new("RGB", (100, 100), "white")
+        draw = ImageDraw.Draw(image)
+        draw.polygon((60, 10, 95, 15, 90, 45), fill="black")
+        image.save(polygon_image_path)
+        polygon_manifest = ImageManifest.model_validate(
+            {
+                **self.manifest.model_dump(),
+                "exclusion_polygons": [
+                    {
+                        "label": "manual polygon 1",
+                        "points": [
+                            {"x": 0.60, "y": 0.10},
+                            {"x": 0.95, "y": 0.15},
+                            {"x": 0.90, "y": 0.45},
+                        ],
+                    }
+                ],
+            }
+        )
+
+        prepared_path = runner.prepare_image("batch-1", polygon_image_path, polygon_manifest)
+
+        with Image.open(prepared_path) as prepared_image:
+            self.assertNotEqual(prepared_image.getpixel((80, 20)), (0, 0, 0))
+
     def test_runner_requires_meta_output(self) -> None:
         runner = DigitizerRunner(self.settings)
 

@@ -203,6 +203,7 @@ async def save_review(
     crop_right: str = Form(default=""),
     crop_bottom: str = Form(default=""),
     exclusion_regions_json: str = Form(default="[]"),
+    exclusion_polygons_json: str = Form(default="[]"),
     crop_hint: str = Form(default=""),
     notes: str = Form(default=""),
     llm_confidence: float = Form(default=1.0),
@@ -237,6 +238,7 @@ async def save_review(
         crop_right=parse_optional_float(crop_right),
         crop_bottom=parse_optional_float(crop_bottom),
         exclusion_regions=parse_exclusion_regions(exclusion_regions_json),
+        exclusion_polygons=parse_exclusion_polygons(exclusion_polygons_json),
         crop_hint=crop_hint or None,
         notes=notes or None,
         llm_confidence=llm_confidence,
@@ -571,6 +573,16 @@ def parse_exclusion_regions(value: str) -> list[dict]:
     parsed = json.loads(stripped)
     if not isinstance(parsed, list):
         raise ValueError("exclusion_regions_json must be a JSON array")
+    return parsed
+
+
+def parse_exclusion_polygons(value: str) -> list[dict]:
+    stripped = value.strip()
+    if not stripped:
+        return []
+    parsed = json.loads(stripped)
+    if not isinstance(parsed, list):
+        raise ValueError("exclusion_polygons_json must be a JSON array")
     return parsed
 
 
