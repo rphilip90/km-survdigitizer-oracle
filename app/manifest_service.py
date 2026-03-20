@@ -73,30 +73,27 @@ Return JSON with exactly these keys:
 - crop_right
 - crop_bottom
 - exclusion_regions
+- exclusion_polygons
 - crop_hint
 - notes
 - llm_confidence
 - review_required
 
 Important rules:
-- Identify the actual plotting panel only. Exclude number-at-risk tables, top summary tables, captions, keywords, and any decorative page content outside the axes.
-- Preserve the full x-axis line, y-axis line, all visible major and minor tick marks, and all axis labels required to reconstruct the plot scale.
-- Do not return a crop that cuts off the right edge of the x-axis, the base of the y-axis, or the label zones around those axes.
-- crop_left, crop_top, crop_right, and crop_bottom must keep the full x-axis, full y-axis, all visible tick marks, and all axis labels needed for digitization. Do not crop into the axes.
-- If the figure contains non-plot blocks such as a risk table, hazard-ratio table, top summary block, or caption that intrude into the crop rectangle, use exclusion_regions to mask them while preserving the full axes.
-- Exclusion masks should go around risk tables or summary blocks instead of replacing the entire plot crop. Use as many exclusion_regions as needed to preserve the whole axis envelope.
-- exclusion_regions must be a JSON array of objects. Each object must have left, top, right, bottom as normalized numbers between 0 and 1 plus an optional label. Return [] when no masking is needed.
-- Prefer a generous crop plus one or more exclusion_regions over an aggressive crop that cuts off axes or tick labels.
-- If the full image is already just the plotting panel, set crop_left, crop_top, crop_right, and crop_bottom to null.
-- If the plot layout is complex or you are not confident that the crop and masks preserve the full axes, set review_required to true.
+- Do not guess crop coordinates or exclusion-mask coordinates. Manual crop and mask drawing is handled in the review UI.
+- Always return crop_left, crop_top, crop_right, and crop_bottom as null.
+- Always return exclusion_regions as [].
+- Always return exclusion_polygons as [].
+- If the figure contains risk tables, summary tables, captions, panel labels, or other non-plot blocks that likely require manual crop or masking, explain that in notes or crop_hint and set review_required to true.
+- If the plot layout is complex or likely needs manual crop before digitization, set review_required to true.
 - x_increment and y_increment must be plain JSON numbers only.
 - If minor ticks are visibly present, x_increment and y_increment must be the minor tick spacing itself.
 - Put any explanation about tick marks, uncertainty, units, or assumptions in notes, not in numeric fields.
 - y_text_vertical is true only if the y-axis labels are rotated vertically.
 - rotation must be one of 0, 90, 180, 270 and means the clockwise correction needed before digitization.
-- crop_hint should briefly explain what was excluded, for example "exclude risk table and top summary"; otherwise null.
+- crop_hint should briefly explain whether manual crop or masking is recommended, for example "manual crop recommended: exclude risk table below x-axis"; otherwise null.
 - review_required must be true if any axis limit, increment, or curve count is uncertain.
-- review_required must be true if the plot panel bounds or exclusion_regions are uncertain.
+- review_required must be true if the image likely needs manual crop or masking before digitization.
 - llm_confidence must be a number between 0 and 1.
 - Do not include markdown, prose, or extra keys.
 

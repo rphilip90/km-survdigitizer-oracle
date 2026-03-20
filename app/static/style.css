@@ -427,6 +427,23 @@ td {
     gap: 0.75rem;
 }
 
+.advanced-section {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 0.8rem 0.9rem;
+    background: #f9fafb;
+}
+
+.advanced-section summary {
+    cursor: pointer;
+    font-weight: 700;
+}
+
+.advanced-section[open] {
+    display: grid;
+    gap: 0.8rem;
+}
+
 .preflight-list {
     display: grid;
     gap: 0.85rem;

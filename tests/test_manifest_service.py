@@ -117,6 +117,13 @@ class ManifestParsingTests(unittest.TestCase):
         self.assertEqual(len(manifest.exclusion_regions), 1)
         self.assertEqual(manifest.exclusion_regions[0].label, "top summary")
 
+    def test_prompt_disables_ai_crop_coordinate_guessing(self) -> None:
+        prompt = self.service.build_prompt("image-1", "plot.png")
+
+        self.assertIn("Do not guess crop coordinates or exclusion-mask coordinates", prompt)
+        self.assertIn("Always return crop_left, crop_top, crop_right, and crop_bottom as null", prompt)
+        self.assertIn("Always return exclusion_polygons as []", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()

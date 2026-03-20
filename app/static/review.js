@@ -14,10 +14,10 @@
         const selection = document.getElementById("crop-selection");
         const polygonGroup = document.getElementById("polygon-mask-group");
         const activePolygon = document.getElementById("active-polygon-mask");
+        const previewCanvas = document.getElementById("cropped-preview-canvas");
         const clearCropButton = document.getElementById("clear-manual-crop");
         const cropModeButton = document.getElementById("crop-mode-button");
         const polygonModeButton = document.getElementById("polygon-mode-button");
-        const finishPolygonButton = document.getElementById("finish-polygon-mask");
         const clearLastPolygonButton = document.getElementById("clear-last-polygon-mask");
         const clearAllPolygonsButton = document.getElementById("clear-all-polygon-masks");
         const polygonField = document.getElementById("exclusion-polygons-input");
@@ -30,8 +30,8 @@
 
         if (
             !image || !overlay || !svg || !selection || !polygonGroup || !activePolygon ||
-            !clearCropButton || !cropModeButton || !polygonModeButton ||
-            !finishPolygonButton || !clearLastPolygonButton || !clearAllPolygonsButton ||
+            !previewCanvas || !clearCropButton || !cropModeButton || !polygonModeButton ||
+            !clearLastPolygonButton || !clearAllPolygonsButton ||
             !polygonField || Object.values(inputs).some((input) => !input)
         ) {
             return;
@@ -40,6 +40,7 @@
         let mode = "crop";
         let dragState = null;
         let activePolygonPoints = [];
+        let drawState = null;
         let polygons = parsePolygons();
 
         function parsePolygons() {
@@ -64,7 +65,6 @@
             cropModeButton.dataset.active = String(mode === "crop");
             polygonModeButton.dataset.active = String(mode === "polygon");
             overlay.dataset.mode = mode;
-            finishPolygonButton.disabled = mode !== "polygon" || activePolygonPoints.length < 3;
             clearLastPolygonButton.disabled = polygons.length === 0 && activePolygonPoints.length === 0;
             clearAllPolygonsButton.disabled = polygons.length === 0;
         }
@@ -159,45 +159,50 @@
                 return point.x + "," + point.y;
             }).join(" ");
             activePolygon.setAttribute("points", activePoints);
-            finishPolygonButton.disabled = mode !== "polygon" || activePolygonPoints.length < 3;
             clearLastPolygonButton.disabled = polygons.length === 0 && activePolygonPoints.length === 0;
             clearAllPolygonsButton.disabled = polygons.length === 0;
-        }
-
-        function finishActivePolygon() {
-            if (activePolygonPoints.length < 3) {
-                return;
-            }
-            polygons.push({
-                label: "manual polygon " + (polygons.length + 1),
-                points: activePolygonPoints.map(normalizedPoint),
-            });
-            writePolygons();
-            clearActivePolygon();
-            renderPolygons();
+            renderPreview();
         }
 
         svg.addEventListener("pointerdown", function (event) {
-            if (mode !== "crop") {
+            if (mode === "crop") {
+                const start = pointPosition(event);
+                dragState = { startX: start.x, startY: start.y };
+                svg.setPointerCapture(event.pointerId);
+                setSelection(start.x, start.y, start.x + 1, start.y + 1);
+                event.preventDefault();
                 return;
             }
-            const start = pointPosition(event);
-            dragState = { startX: start.x, startY: start.y };
-            svg.setPointerCapture(event.pointerId);
-            setSelection(start.x, start.y, start.x + 1, start.y + 1);
-            event.preventDefault();
+            if (mode === "polygon") {
+                const start = pointPosition(event);
+                drawState = { points: [start] };
+                activePolygonPoints = [start];
+                svg.setPointerCapture(event.pointerId);
+                renderPolygons();
+                event.preventDefault();
+            }
         });
 
         svg.addEventListener("pointermove", function (event) {
-            if (mode !== "crop" || !dragState) {
+            if (mode === "crop" && dragState) {
+                const current = pointPosition(event);
+                const left = Math.min(dragState.startX, current.x);
+                const top = Math.min(dragState.startY, current.y);
+                const right = Math.max(dragState.startX, current.x);
+                const bottom = Math.max(dragState.startY, current.y);
+                setSelection(left, top, right, bottom);
                 return;
             }
-            const current = pointPosition(event);
-            const left = Math.min(dragState.startX, current.x);
-            const top = Math.min(dragState.startY, current.y);
-            const right = Math.max(dragState.startX, current.x);
-            const bottom = Math.max(dragState.startY, current.y);
-            setSelection(left, top, right, bottom);
+            if (mode === "polygon" && drawState) {
+                const current = pointPosition(event);
+                const lastPoint = drawState.points[drawState.points.length - 1];
+                const distance = Math.hypot(current.x - lastPoint.x, current.y - lastPoint.y);
+                if (distance >= 4) {
+                    drawState.points.push(current);
+                    activePolygonPoints = drawState.points.slice();
+                    renderPolygons();
+                }
+            }
         });
 
         function finishCrop(event) {
@@ -218,19 +223,32 @@
 
             setSelection(left, top, right, bottom);
             updateCropInputs(left, top, right, bottom);
+            renderPreview();
         }
 
         svg.addEventListener("pointerup", finishCrop);
         svg.addEventListener("pointercancel", function () {
             dragState = null;
+            drawState = null;
         });
 
-        svg.addEventListener("click", function (event) {
-            if (mode !== "polygon") {
+        svg.addEventListener("pointerup", function (event) {
+            if (mode !== "polygon" || !drawState) {
                 return;
             }
-            const point = pointPosition(event);
-            activePolygonPoints.push(point);
+            const current = pointPosition(event);
+            if (drawState.points.length === 1) {
+                drawState.points.push(current);
+            }
+            if (drawState.points.length >= 3) {
+                polygons.push({
+                    label: "manual mask " + (polygons.length + 1),
+                    points: drawState.points.map(normalizedPoint),
+                });
+                writePolygons();
+            }
+            drawState = null;
+            clearActivePolygon();
             renderPolygons();
         });
 
@@ -241,8 +259,6 @@
         polygonModeButton.addEventListener("click", function () {
             setMode("polygon");
         });
-
-        finishPolygonButton.addEventListener("click", finishActivePolygon);
 
         clearLastPolygonButton.addEventListener("click", function () {
             if (activePolygonPoints.length > 0) {
@@ -268,6 +284,7 @@
             inputs.right.value = "";
             inputs.bottom.value = "";
             hideSelection();
+            renderPreview();
         });
 
         polygonField.addEventListener("input", function () {
@@ -277,7 +294,10 @@
         });
 
         Object.values(inputs).forEach(function (input) {
-            input.addEventListener("input", syncCropFromInputs);
+            input.addEventListener("input", function () {
+                syncCropFromInputs();
+                renderPreview();
+            });
         });
 
         window.addEventListener("resize", function () {
@@ -292,6 +312,54 @@
         syncCropFromInputs();
         renderPolygons();
         setMode("crop");
+
+        function renderPreview() {
+            const context = previewCanvas.getContext("2d");
+            if (!context || !image.naturalWidth || !image.naturalHeight) {
+                return;
+            }
+
+            const leftValue = parseFloat(inputs.left.value);
+            const topValue = parseFloat(inputs.top.value);
+            const rightValue = parseFloat(inputs.right.value);
+            const bottomValue = parseFloat(inputs.bottom.value);
+
+            const hasCrop = ![leftValue, topValue, rightValue, bottomValue].some((value) => Number.isNaN(value));
+            const sourceWidth = image.naturalWidth;
+            const sourceHeight = image.naturalHeight;
+
+            const sx = hasCrop ? Math.round(clamp(leftValue, 0, 1) * sourceWidth) : 0;
+            const sy = hasCrop ? Math.round(clamp(topValue, 0, 1) * sourceHeight) : 0;
+            const sw = hasCrop ? Math.max(1, Math.round((clamp(rightValue, 0, 1) - clamp(leftValue, 0, 1)) * sourceWidth)) : sourceWidth;
+            const sh = hasCrop ? Math.max(1, Math.round((clamp(bottomValue, 0, 1) - clamp(topValue, 0, 1)) * sourceHeight)) : sourceHeight;
+
+            previewCanvas.width = sw;
+            previewCanvas.height = sh;
+            context.clearRect(0, 0, sw, sh);
+            context.drawImage(image, sx, sy, sw, sh, 0, 0, sw, sh);
+
+            context.save();
+            context.fillStyle = "rgba(255, 255, 255, 0.92)";
+            polygons.forEach(function (polygon) {
+                const points = polygon.points || [];
+                if (points.length < 3) {
+                    return;
+                }
+                context.beginPath();
+                points.forEach(function (point, index) {
+                    const px = (point.x * sourceWidth) - sx;
+                    const py = (point.y * sourceHeight) - sy;
+                    if (index === 0) {
+                        context.moveTo(px, py);
+                    } else {
+                        context.lineTo(px, py);
+                    }
+                });
+                context.closePath();
+                context.fill();
+            });
+            context.restore();
+        }
     }
 
     if (document.readyState === "loading") {
