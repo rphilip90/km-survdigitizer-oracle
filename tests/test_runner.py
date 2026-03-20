@@ -208,6 +208,28 @@ class RunnerTests(unittest.TestCase):
         self.assertTrue(artifacts.review_overlay_path.exists())
         self.assertEqual(artifacts.preview_payload["metrics"]["plot_width"], 15)
 
+    def test_commit_approved_crop_uses_plot_bounds(self) -> None:
+        runner = DigitizerRunner(self.settings)
+        prepared_path = self.root / "commit-source.png"
+        Image.new("RGB", (200, 160), "white").save(prepared_path)
+        preview_payload = {
+            "plot_bounds": {
+                "left": 40,
+                "right": 160,
+                "top": 20,
+                "bottom": 120,
+            }
+        }
+
+        approved_path = runner.commit_approved_crop("batch-1", "image-1", prepared_path, preview_payload)
+
+        self.assertTrue(approved_path.exists())
+        with Image.open(approved_path) as approved_image:
+            self.assertLess(approved_image.size[0], 200)
+            self.assertLess(approved_image.size[1], 160)
+            self.assertGreaterEqual(approved_image.size[0], 120)
+            self.assertGreaterEqual(approved_image.size[1], 100)
+
     def test_runner_requires_overlay_output(self) -> None:
         runner = DigitizerRunner(self.settings)
 

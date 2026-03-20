@@ -244,10 +244,20 @@ async def save_review(
     )
 
     try:
-        preview_fields, report = ensure_preflight_preview(image, manifest)
+        preview_fields, report, preview_payload = ensure_preflight_preview(image, manifest)
         saved_manifest = manifest.model_copy(update={"review_required": manifest.review_required or report.blocking})
         next_status = "queued" if rerun_requested and not saved_manifest.review_required else "needs_review"
         error_message = build_review_message(saved_manifest, threshold, report, False)
+        queued_runner = process_single_image
+        if crop_approved and rerun_requested and not saved_manifest.review_required:
+            approved_prepared_path = digitizer_runner.commit_approved_crop(
+                batch_id=image["batch_id"],
+                image_id=image_id,
+                prepared_path=Path(preview_fields["prepared_path"]),
+                preview_payload=preview_payload,
+            )
+            preview_fields["prepared_path"] = str(approved_prepared_path)
+            queued_runner = process_prepared_image
         if not rerun_requested and not saved_manifest.review_required and not report.blocking:
             error_message = (
                 report.warnings[0]
@@ -284,7 +294,10 @@ async def save_review(
         )
 
         if rerun_requested and not saved_manifest.review_required:
-            executor.submit(process_single_image, image_id, False)
+            if queued_runner is process_prepared_image:
+                executor.submit(process_prepared_image, image_id)
+            else:
+                executor.submit(process_single_image, image_id, False)
     except Exception as error:  # noqa: BLE001
         update_image(settings, image_id, status="failed", error_message=str(error))
         append_image_log(
@@ -398,7 +411,7 @@ def process_single_image(image_id: str, regenerate_manifest: bool) -> None:
             manifest = ImageManifest.model_validate(image["manifest"])
             append_image_log(settings, image_id, "manifest_loaded", "Using the saved reviewed manifest.")
 
-        preview_fields, report = ensure_preflight_preview(image, manifest)
+        preview_fields, report, _ = ensure_preflight_preview(image, manifest)
         manifest_for_run = manifest.model_copy(update={"review_required": manifest.review_required or report.blocking})
         requires_review = manifest_for_run.should_review(threshold) if regenerate_manifest else manifest_for_run.review_required
 
@@ -462,7 +475,52 @@ def process_single_image(image_id: str, regenerate_manifest: bool) -> None:
         )
 
 
-def ensure_preflight_preview(image: dict, manifest: ImageManifest) -> tuple[dict[str, str | None], PreflightReport]:
+def process_prepared_image(image_id: str) -> None:
+    image = get_image(settings, image_id)
+    if not image:
+        return
+    try:
+        manifest = ImageManifest.model_validate(image["manifest"])
+        prepared_path_value = image.get("prepared_path")
+        if not prepared_path_value:
+            raise RuntimeError("No approved prepared image was available for rerun.")
+        prepared_path = Path(prepared_path_value)
+        if not prepared_path.exists():
+            raise RuntimeError("The approved prepared image no longer exists on disk.")
+
+        append_image_log(settings, image_id, "processing_digitizer", "Running SurvdigitizeR extraction on the approved cropped image.")
+        update_image(settings, image_id, status="processing_digitizer", error_message=None)
+        prepared_path, output_csv_path, output_meta_path, output_log_path, annotated_path = digitizer_runner.run(
+            batch_id=image["batch_id"],
+            image_id=image["id"],
+            image_path=Path(image["original_path"]),
+            manifest=manifest,
+            prepared_path=prepared_path,
+        )
+        update_image(
+            settings,
+            image_id,
+            prepared_path=str(prepared_path),
+            annotated_path=str(annotated_path),
+            output_csv_path=str(output_csv_path),
+            output_meta_path=str(output_meta_path),
+            output_log_path=str(output_log_path),
+            status="completed",
+            error_message=None,
+            review_required=0,
+        )
+        append_image_log(
+            settings,
+            image_id,
+            "completed",
+            "Digitization completed and artifacts were written successfully.",
+        )
+    except Exception as error:  # noqa: BLE001
+        update_image(settings, image_id, status="failed", error_message=str(error))
+        append_image_log(settings, image_id, "failed", str(error), level="error")
+
+
+def ensure_preflight_preview(image: dict, manifest: ImageManifest) -> tuple[dict[str, str | None], PreflightReport, dict]:
     append_image_log(
         settings,
         image["id"],
@@ -496,7 +554,7 @@ def ensure_preflight_preview(image: dict, manifest: ImageManifest) -> tuple[dict
         "review_overlay_path": str(artifacts.review_overlay_path),
         "output_log_path": str(artifacts.output_log_path),
         "preflight_json": serialize_preflight(report.model_dump()),
-    }, report
+    }, report, artifacts.preview_payload
 
 
 def parse_optional_float(value: str) -> float | None:

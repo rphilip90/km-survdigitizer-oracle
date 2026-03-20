@@ -51,7 +51,7 @@ class MainFlowTests(unittest.TestCase):
         self,
         blocking: bool = False,
         warning: str | None = None,
-    ) -> tuple[dict[str, str | None], PreflightReport]:
+    ) -> tuple[dict[str, str | None], PreflightReport, dict]:
         prepared_path = self.root / "preflight-prepared.png"
         review_overlay_path = self.root / "preflight-review.png"
         preflight_log_path = self.root / "preflight.log"
@@ -76,12 +76,20 @@ class MainFlowTests(unittest.TestCase):
             warnings=warnings,
             metrics={"plot_width": 2 if blocking else 180},
         )
+        preview_payload = {
+            "plot_bounds": {
+                "left": 20,
+                "right": 160,
+                "top": 15,
+                "bottom": 110,
+            }
+        }
         return {
             "prepared_path": str(prepared_path),
             "review_overlay_path": str(review_overlay_path),
             "output_log_path": str(preflight_log_path),
             "preflight_json": main.serialize_preflight(report.model_dump()),
-        }, report
+        }, report, preview_payload
 
     def test_save_review_and_rerun_clears_review_flag(self) -> None:
         preflight_result = self.make_preflight_result()
@@ -119,9 +127,12 @@ class MainFlowTests(unittest.TestCase):
 
     def test_approve_crop_button_clears_review_and_reruns(self) -> None:
         preflight_result = self.make_preflight_result()
+        approved_path = self.root / "approved-prepared.png"
+        approved_path.write_text("approved", encoding="utf-8")
         with (
             TestClient(main.app) as client,
             mock.patch.object(main, "ensure_preflight_preview", return_value=preflight_result),
+            mock.patch.object(main.digitizer_runner, "commit_approved_crop", return_value=approved_path),
         ):
             response = client.post(
                 f"/images/{self.image_id}/review",
@@ -164,7 +175,9 @@ class MainFlowTests(unittest.TestCase):
         self.assertFalse(image["review_required"])
         self.assertEqual(image["status"], "queued")
         self.assertAlmostEqual(image["manifest"]["crop_left"], 0.12)
+        self.assertEqual(Path(image["prepared_path"]), approved_path)
         self.assertEqual(len(self.fake_executor.calls), 1)
+        self.assertEqual(self.fake_executor.calls[0][0], main.process_prepared_image)
         stages = [entry["stage"] for entry in image["processing_log"]]
         self.assertIn("crop_approved", stages)
 

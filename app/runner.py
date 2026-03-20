@@ -262,6 +262,47 @@ class DigitizerRunner:
             output_log_path=output_log_path,
         )
 
+    def commit_approved_crop(
+        self,
+        batch_id: str,
+        image_id: str,
+        prepared_path: Path,
+        preview_payload: dict,
+    ) -> Path:
+        plot = preview_payload.get("plot_bounds") or {}
+        if not plot:
+            raise RuntimeError("Cannot approve the suggested crop because the pre-flight preview did not include plot bounds.")
+
+        with Image.open(prepared_path) as source_image:
+            width, height = source_image.size
+            left = int(self._clamp(float(plot.get("left", 0)), 0, width - 1))
+            right = int(self._clamp(float(plot.get("right", width - 1)), 0, width - 1))
+            top = int(self._clamp(float(plot.get("top", 0)), 0, height - 1))
+            bottom = int(self._clamp(float(plot.get("bottom", height - 1)), 0, height - 1))
+
+            if right <= left or bottom <= top:
+                raise RuntimeError("Cannot approve the suggested crop because the detected plot bounds were invalid.")
+
+            padding_x = max(8, int((right - left) * 0.04))
+            padding_y = max(8, int((bottom - top) * 0.06))
+            crop_box = (
+                max(0, left - padding_x),
+                max(0, top - padding_y),
+                min(width, right + padding_x),
+                min(height, bottom + padding_y),
+            )
+
+            if crop_box[2] - crop_box[0] < 40 or crop_box[3] - crop_box[1] < 40:
+                raise RuntimeError("Cannot approve the suggested crop because the detected plot bounds are too small.")
+
+            approved_image = source_image.crop(crop_box)
+
+        prepared_dir = self.settings.upload_dir / batch_id / "prepared"
+        prepared_dir.mkdir(parents=True, exist_ok=True)
+        approved_path = prepared_dir / f"{image_id}.approved.png"
+        approved_image.save(approved_path)
+        return approved_path
+
     def render_digitized_overlay(
         self,
         prepared_path: Path,
