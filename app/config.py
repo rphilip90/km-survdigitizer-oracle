@@ -46,7 +46,7 @@ class Settings:
 
         data_dir = DATA_DIR
         return cls(
-            app_title=os.getenv("APP_TITLE", "KM SurvdigitizeR Batch Runner"),
+            app_title=os.getenv("APP_TITLE", "Survival Curve Studio"),
             app_host=os.getenv("APP_HOST", "0.0.0.0"),
             app_port=int(os.getenv("APP_PORT", "8000")),
             data_dir=data_dir,

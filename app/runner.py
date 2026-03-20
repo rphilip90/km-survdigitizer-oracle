@@ -160,17 +160,17 @@ class DigitizerRunner:
         )
 
         if result.returncode != 0:
-            message = (result.stderr or result.stdout or "SurvdigitizeR run failed").strip()
+            message = (result.stderr or result.stdout or "Extraction run failed").strip()
             raise RuntimeError(message)
 
         if not output_csv_path.exists():
-            raise RuntimeError("SurvdigitizeR finished without writing the CSV output.")
+            raise RuntimeError("The extraction run finished without writing the CSV output.")
 
         if not output_meta_path.exists():
-            raise RuntimeError("SurvdigitizeR finished without writing the metadata output.")
+            raise RuntimeError("The extraction run finished without writing the metadata output.")
 
         if not output_overlay_points_path.exists():
-            raise RuntimeError("SurvdigitizeR finished without writing the overlay point output.")
+            raise RuntimeError("The extraction run finished without writing the overlay point output.")
 
         self.render_digitized_overlay(
             prepared_path=prepared_path,

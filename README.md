@@ -1,12 +1,12 @@
-# KM SurvdigitizeR Oracle
+# Survival Curve Studio
 
-A small hosted batch app for Kaplan-Meier image digitization using OpenAI Vision for parameter inference and `SurvdigitizeR` for extraction.
+A small hosted batch app for Kaplan-Meier image digitization using OpenAI Vision for parameter inference and an R-based extraction engine under the hood.
 
 ## What It Does
 
 1. Upload a folder or zip of KM images.
 2. Generate a structured manifest per image with OpenAI Vision.
-3. Auto-run `SurvdigitizeR` on high-confidence images.
+3. Auto-run extraction on high-confidence images.
 4. Queue ambiguous images for review.
 5. Export combined outputs, manifests, source images, and run logs.
 

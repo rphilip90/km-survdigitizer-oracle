@@ -91,6 +91,15 @@ class MainFlowTests(unittest.TestCase):
             "preflight_json": main.serialize_preflight(report.model_dump()),
         }, report, preview_payload
 
+    def test_home_page_uses_product_branding(self) -> None:
+        with TestClient(main.app) as client:
+            response = client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Survival Curve Studio", response.text)
+        self.assertIn("Review-first batch extraction for Kaplan-Meier figures", response.text)
+        self.assertIn("Start New Batch", response.text)
+
     def test_save_review_and_rerun_clears_review_flag(self) -> None:
         preflight_result = self.make_preflight_result()
         with (
@@ -284,6 +293,23 @@ class MainFlowTests(unittest.TestCase):
         self.assertIn("Zoom", response.text)
         self.assertIn("manual crop recommended", response.text)
         self.assertIn("zoom-slider", response.text)
+
+    def test_batch_page_shows_progress_panel(self) -> None:
+        second_image_path = self.settings.upload_dir / "second.png"
+        second_image_path.parent.mkdir(parents=True, exist_ok=True)
+        second_image_path.write_bytes(b"fake-image-2")
+        second_image_id = create_image(self.settings, self.batch_id, "second.png", str(second_image_path))
+
+        update_image(self.settings, self.image_id, status="completed")
+        update_image(self.settings, second_image_id, status="needs_review", review_required=1)
+
+        with TestClient(main.app) as client:
+            response = client.get(f"/batches/{self.batch_id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Workflow progress", response.text)
+        self.assertIn("progress-bar", response.text)
+        self.assertIn("Ready results", response.text)
 
     def test_process_single_image_logs_review_pause(self) -> None:
         manifest = ImageManifest(

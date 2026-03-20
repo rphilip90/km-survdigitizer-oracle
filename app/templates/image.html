@@ -247,7 +247,7 @@
     <div class="section-head">
         <div>
             <h2>Pre-Flight Checks</h2>
-            <p class="panel-hint">These checks run before the full SurvdigitizeR pipeline. Blocking checks pause the image in review instead of letting the package fail deeper in the workflow.</p>
+            <p class="panel-hint">These checks run before the full extraction pipeline. Blocking checks pause the image in review instead of letting a bad run continue deeper into processing.</p>
         </div>
         {% if image.preflight_report %}
         <div class="actions">

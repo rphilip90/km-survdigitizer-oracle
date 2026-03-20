@@ -17,12 +17,16 @@
         {% set stage.queued = stage.queued + 1 %}
     {% endif %}
 {% endfor %}
+{% set total = batch.image_count if batch.image_count > 0 else 1 %}
+{% set running = stage.manifest + stage.digitizer %}
+{% set actionable = stage.completed + stage.review + stage.failed + running %}
+{% set completion_percent = ((actionable / total) * 100)|round(0, 'floor') %}
 
 <section class="panel">
     <div class="section-head">
         <div>
             <h1>{{ batch.label }}</h1>
-            <p class="panel-hint">Auto-approve threshold: {{ "%.2f"|format(batch.auto_approve_threshold) }}</p>
+            <p class="panel-hint">Confidence threshold: {{ "%.2f"|format(batch.auto_approve_threshold) }}</p>
         </div>
         <div class="actions">
             <a href="/batches/{{ batch.id }}/export" class="btn btn-secondary">Export Batch</a>
@@ -41,6 +45,47 @@
         <span>{{ batch.image_count }} images</span>
         <span>Updated {{ batch.updated_at }}</span>
     </div>
+    <div class="progress-panel">
+        <div class="progress-panel-head">
+            <div>
+                <strong>Workflow progress</strong>
+                <span>{{ completion_percent }}% of images have moved into review, running, failed, or completed states.</span>
+            </div>
+            <span>{{ actionable }} of {{ batch.image_count }}</span>
+        </div>
+        <div class="progress-bar" aria-label="Batch progress">
+            <span class="progress-segment progress-completed" style="width: {{ (stage.completed / total * 100)|round(3) }}%"></span>
+            <span class="progress-segment progress-review" style="width: {{ (stage.review / total * 100)|round(3) }}%"></span>
+            <span class="progress-segment progress-running" style="width: {{ (running / total * 100)|round(3) }}%"></span>
+            <span class="progress-segment progress-failed" style="width: {{ (stage.failed / total * 100)|round(3) }}%"></span>
+            <span class="progress-segment progress-queued" style="width: {{ (stage.queued / total * 100)|round(3) }}%"></span>
+        </div>
+        <div class="progress-legend">
+            <span><i class="legend-swatch progress-completed"></i>Completed {{ stage.completed }}</span>
+            <span><i class="legend-swatch progress-review"></i>Needs review {{ stage.review }}</span>
+            <span><i class="legend-swatch progress-running"></i>Running {{ running }}</span>
+            <span><i class="legend-swatch progress-failed"></i>Failed {{ stage.failed }}</span>
+            <span><i class="legend-swatch progress-queued"></i>Queued {{ stage.queued }}</span>
+        </div>
+    </div>
+    <div class="metric-grid">
+        <div class="metric-card">
+            <strong>{{ stage.completed }}</strong>
+            <span>Ready results</span>
+        </div>
+        <div class="metric-card">
+            <strong>{{ stage.review }}</strong>
+            <span>Awaiting review</span>
+        </div>
+        <div class="metric-card">
+            <strong>{{ running }}</strong>
+            <span>Currently running</span>
+        </div>
+        <div class="metric-card">
+            <strong>{{ stage.failed }}</strong>
+            <span>Need debugging</span>
+        </div>
+    </div>
 
     {% if batch.status in ["queued", "processing"] %}
     <div class="state-banner state-banner-processing">
@@ -50,7 +95,7 @@
         <span>{{ stage.manifest }} image{{ "" if stage.manifest == 1 else "s" }} currently in manifest generation.</span>
         {% endif %}
         {% if stage.digitizer %}
-        <span>{{ stage.digitizer }} image{{ "" if stage.digitizer == 1 else "s" }} currently running through SurvdigitizeR.</span>
+        <span>{{ stage.digitizer }} image{{ "" if stage.digitizer == 1 else "s" }} currently running through extraction.</span>
         {% endif %}
         {% if stage.queued %}
         <span>{{ stage.queued }} image{{ "" if stage.queued == 1 else "s" }} still queued.</span>
@@ -98,9 +143,9 @@
                             <span class="status {{ image.status }}">{{ image.status }}</span>
                             <span class="status-copy">
                                 {% if image.status == "processing_manifest" %}
-                                OpenAI is reading axes and curve count.
+                                Reading axes, tick spacing, and curve count.
                                 {% elif image.status == "processing_digitizer" %}
-                                SurvdigitizeR is extracting coordinates.
+                                Running the extraction workflow.
                                 {% elif image.status == "needs_review" %}
                                 Paused until you confirm or edit the manifest.
                                 {% elif image.status == "failed" %}

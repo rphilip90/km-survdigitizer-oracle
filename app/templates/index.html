@@ -1,28 +1,76 @@
 {% extends "base.html" %}
 
 {% block content %}
+<section class="hero-panel">
+    <div class="hero-copy">
+        <span class="eyebrow">Kaplan-Meier Workflow</span>
+        <h1>Batch review and extraction built for survival plots.</h1>
+        <p class="hero-text">Upload a folder of figures, let the app read axes and curve structure, then step into manual crop review only where it is actually needed. The workflow stays visible, exportable, and easy to rerun.</p>
+        <div class="hero-stats">
+            <div class="hero-stat">
+                <strong>1</strong>
+                <span>Upload a zip or image set</span>
+            </div>
+            <div class="hero-stat">
+                <strong>2</strong>
+                <span>Review only flagged images</span>
+            </div>
+            <div class="hero-stat">
+                <strong>3</strong>
+                <span>Export annotated results</span>
+            </div>
+        </div>
+    </div>
+    <div class="panel hero-form-panel">
+        <div class="section-head">
+            <div>
+                <h2>Start New Batch</h2>
+                <p class="panel-hint">Set the confidence level you are comfortable with. Lower-confidence images pause for manual review instead of failing silently.</p>
+            </div>
+        </div>
+        <form action="/batches" method="post" enctype="multipart/form-data" class="stack">
+            <label>
+                <span>Batch Label</span>
+                <input type="text" name="batch_label" placeholder="e.g. AML OS figures March review">
+            </label>
+            <label>
+                <span>Auto-Approve Threshold</span>
+                <input type="number" name="auto_approve_threshold" min="0" max="1" step="0.01" value="{{ "%.2f"|format(default_threshold) }}">
+            </label>
+            <label>
+                <span>Zip File</span>
+                <input type="file" name="zip_file" accept=".zip">
+            </label>
+            <label>
+                <span>Or Image Files</span>
+                <input type="file" name="images" accept="image/*" multiple>
+            </label>
+            <button type="submit" class="btn btn-primary">Create Batch</button>
+        </form>
+    </div>
+</section>
+
 <section class="panel">
-    <h1>New Batch</h1>
-    <p class="panel-hint">Upload a zip file or one or more images. High-confidence images run automatically; ambiguous ones pause for review.</p>
-    <form action="/batches" method="post" enctype="multipart/form-data" class="stack">
-        <label>
-            <span>Batch Label</span>
-            <input type="text" name="batch_label" placeholder="e.g. AML KM extraction 2026-03-17">
-        </label>
-        <label>
-            <span>Auto-Approve Threshold</span>
-            <input type="number" name="auto_approve_threshold" min="0" max="1" step="0.01" value="{{ "%.2f"|format(default_threshold) }}">
-        </label>
-        <label>
-            <span>Zip File</span>
-            <input type="file" name="zip_file" accept=".zip">
-        </label>
-        <label>
-            <span>Or Image Files</span>
-            <input type="file" name="images" accept="image/*" multiple>
-        </label>
-        <button type="submit" class="btn btn-primary">Create Batch</button>
-    </form>
+    <div class="section-head">
+        <div>
+            <h2>How It Flows</h2>
+            <p class="panel-hint">The interface is designed to stay calm under mixed-quality publication figures.</p>
+        </div>
+    </div>
+    <div class="feature-grid">
+        <div class="feature-card">
+            <strong>Semantic first pass</strong>
+            <p>The app proposes curve count, axis ranges, tick spacing, and review notes before extraction starts.</p>
+        </div>
+        <div class="feature-card">
+            <strong>Manual crop where needed</strong>
+            <p>Crop and mask review is only used on complex layouts with risk tables, panel labels, or summary blocks.</p>
+        </div>
+        <div class="feature-card">
+            <strong>Traceable outputs</strong>
+            <p>Every image keeps its manifest, review state, timeline, preview overlays, and export-ready artifacts together.</p>
+        </div>
+    </div>
 </section>
 
 <section class="panel">
@@ -39,11 +87,14 @@
                     <span>{{ batch.image_count }} images</span>
                     <span>{{ batch.created_at }}</span>
                 </div>
+                <p class="card-copy">
+                    Threshold {{ "%.2f"|format(batch.auto_approve_threshold) }}. Open to review progress, inspect paused images, or export finished results.
+                </p>
             </a>
             {% endfor %}
         </div>
     {% else %}
-        <p>No batches yet.</p>
+        <p class="panel-hint">No batches yet. Start with a zip file or a few image files.</p>
     {% endif %}
 </section>
 {% endblock %}

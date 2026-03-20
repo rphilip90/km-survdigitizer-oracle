@@ -438,7 +438,7 @@ def process_single_image(image_id: str, regenerate_manifest: bool) -> None:
             )
             return
 
-        append_image_log(settings, image_id, "processing_digitizer", "Running SurvdigitizeR extraction.")
+        append_image_log(settings, image_id, "processing_digitizer", "Running the extraction workflow.")
         update_image(settings, image_id, status="processing_digitizer", error_message=None)
         prepared_path, output_csv_path, output_meta_path, output_log_path, annotated_path = digitizer_runner.run(
             batch_id=image["batch_id"],
@@ -490,7 +490,7 @@ def process_prepared_image(image_id: str) -> None:
         if not prepared_path.exists():
             raise RuntimeError("The approved prepared image no longer exists on disk.")
 
-        append_image_log(settings, image_id, "processing_digitizer", "Running SurvdigitizeR extraction on the approved cropped image.")
+        append_image_log(settings, image_id, "processing_digitizer", "Running the extraction workflow on the approved cropped image.")
         update_image(settings, image_id, status="processing_digitizer", error_message=None)
         prepared_path, output_csv_path, output_meta_path, output_log_path, annotated_path = digitizer_runner.run(
             batch_id=image["batch_id"],
