@@ -41,7 +41,7 @@ def build_preflight_report(
     metrics["crop_area_ratio"] = round(_estimate_crop_area_ratio(manifest), 4)
 
     checks: list[PreflightCheck] = []
-    checks.extend(_build_manifest_checks(manifest, metrics))
+    checks.extend(_build_manifest_checks(manifest, metrics, preview_payload))
     checks.extend(_build_prepared_image_checks(manifest, metrics, preview_payload))
     checks.extend(_build_axis_checks(metrics, stage_errors))
     checks.extend(_build_cluster_checks(metrics, stage_errors))
@@ -57,7 +57,7 @@ def build_preflight_report(
     )
 
 
-def _build_manifest_checks(manifest: ImageManifest, metrics: dict) -> list[PreflightCheck]:
+def _build_manifest_checks(manifest: ImageManifest, metrics: dict, preview_payload: dict) -> list[PreflightCheck]:
     checks: list[PreflightCheck] = []
 
     checks.append(
@@ -105,6 +105,7 @@ def _build_manifest_checks(manifest: ImageManifest, metrics: dict) -> list[Prefl
         )
 
     crop_values = [manifest.crop_left, manifest.crop_top, manifest.crop_right, manifest.crop_bottom]
+    has_crop = all(value is not None for value in crop_values)
     if all(value is None for value in crop_values):
         checks.append(
             _check(
@@ -131,7 +132,22 @@ def _build_manifest_checks(manifest: ImageManifest, metrics: dict) -> list[Prefl
             )
         )
 
-    overlap = _axis_guard_overlap(manifest)
+    if not has_crop and (manifest.exclusion_regions or manifest.exclusion_polygons) and float(metrics["mask_coverage_ratio"]) >= WARN_MASK_COVERAGE:
+        checks.append(
+            _check(
+                "manifest-crop-required",
+                "manifest_preflight",
+                "fail",
+                "Large exclusion masks are present but no crop rectangle is set. Draw a crop around the plot panel before rerun.",
+                evidence={
+                    "mask_coverage_ratio": metrics["mask_coverage_ratio"],
+                    "exclusion_polygons": metrics["exclusion_polygon_count"],
+                    "exclusion_regions": metrics["exclusion_region_count"],
+                },
+            )
+        )
+
+    overlap = _axis_guard_overlap(manifest, preview_payload, metrics)
     if overlap["blocking"]:
         checks.append(
             _check(
@@ -583,7 +599,7 @@ def _estimate_mask_coverage_ratio(manifest: ImageManifest) -> float:
     return min(1.0, masked_area / crop_area)
 
 
-def _axis_guard_overlap(manifest: ImageManifest) -> dict[str, float | bool]:
+def _axis_guard_overlap(manifest: ImageManifest, preview_payload: dict, metrics: dict) -> dict[str, float | bool]:
     if not manifest.exclusion_regions and not manifest.exclusion_polygons:
         return {"blocking": False, "warning": False, "left_overlap": 0.0, "bottom_overlap": 0.0}
 
@@ -599,10 +615,44 @@ def _axis_guard_overlap(manifest: ImageManifest) -> dict[str, float | bool]:
     if crop_width <= 0 or crop_height <= 0:
         return {"blocking": True, "warning": False, "left_overlap": 1.0, "bottom_overlap": 1.0}
 
+    prepared_width = float(metrics.get("prepared_width") or 0.0)
+    prepared_height = float(metrics.get("prepared_height") or 0.0)
+    plot_bounds = preview_payload.get("plot_bounds") or {}
+
+    if prepared_width > 0 and prepared_height > 0 and plot_bounds:
+        left_guard_right = min(
+            prepared_width,
+            float(plot_bounds.get("left", 0.0)) + max(24.0, float(metrics.get("plot_width") or 0.0) * 0.06),
+        )
+        bottom_guard_top = max(
+            0.0,
+            float(plot_bounds.get("bottom", prepared_height)) - max(12.0, float(metrics.get("plot_height") or 0.0) * 0.04),
+        )
+        bottom_guard_bottom = min(
+            prepared_height,
+            float(plot_bounds.get("bottom", prepared_height)) + max(32.0, float(metrics.get("plot_height") or 0.0) * 0.1),
+        )
+        left_guard_rect = (
+            crop_left,
+            crop_top,
+            clamp_ratio(left_guard_right / prepared_width),
+            crop_bottom,
+        )
+        bottom_guard_rect = (
+            crop_left,
+            clamp_ratio(bottom_guard_top / prepared_height),
+            crop_right,
+            clamp_ratio(bottom_guard_bottom / prepared_height),
+        )
+    else:
+        left_guard_rect = (crop_left, crop_top, min(crop_right, crop_left + (crop_width * 0.14)), crop_bottom)
+        bottom_guard_rect = (crop_left, max(crop_top, crop_bottom - (crop_height * 0.18)), crop_right, crop_bottom)
+
+    left_guard_area = _rect_area(*left_guard_rect)
+    bottom_guard_area = _rect_area(*bottom_guard_rect)
+
     left_overlap = 0.0
     bottom_overlap = 0.0
-    left_guard = 0.14
-    bottom_guard = 0.18
 
     for region in manifest.exclusion_regions:
         left = max(crop_left, region.left)
@@ -612,31 +662,27 @@ def _axis_guard_overlap(manifest: ImageManifest) -> dict[str, float | bool]:
         if right <= left or bottom <= top:
             continue
 
-        rel_left = (left - crop_left) / crop_width
-        rel_right = (right - crop_left) / crop_width
-        rel_top = (top - crop_top) / crop_height
-        rel_bottom = (bottom - crop_top) / crop_height
-
-        left_overlap = max(left_overlap, max(0.0, min(rel_right, left_guard) - rel_left))
-        bottom_overlap = max(bottom_overlap, max(0.0, rel_bottom - max(rel_top, 1 - bottom_guard)))
+        if left_guard_area > 0:
+            left_overlap = max(left_overlap, _rect_intersection_area((left, top, right, bottom), left_guard_rect) / left_guard_area)
+        if bottom_guard_area > 0:
+            bottom_overlap = max(bottom_overlap, _rect_intersection_area((left, top, right, bottom), bottom_guard_rect) / bottom_guard_area)
 
     for polygon in manifest.exclusion_polygons:
-        x_values = [point.x for point in polygon.points]
-        y_values = [point.y for point in polygon.points]
-        left = max(crop_left, min(x_values))
-        top = max(crop_top, min(y_values))
-        right = min(crop_right, max(x_values))
-        bottom = min(crop_bottom, max(y_values))
-        if right <= left or bottom <= top:
+        normalized_points = [(point.x, point.y) for point in polygon.points]
+        clipped_points = [
+            (
+                clamp_ratio(max(crop_left, min(crop_right, x_value))),
+                clamp_ratio(max(crop_top, min(crop_bottom, y_value))),
+            )
+            for x_value, y_value in normalized_points
+        ]
+        if len(clipped_points) < 3:
             continue
 
-        rel_left = (left - crop_left) / crop_width
-        rel_right = (right - crop_left) / crop_width
-        rel_top = (top - crop_top) / crop_height
-        rel_bottom = (bottom - crop_top) / crop_height
-
-        left_overlap = max(left_overlap, max(0.0, min(rel_right, left_guard) - rel_left))
-        bottom_overlap = max(bottom_overlap, max(0.0, rel_bottom - max(rel_top, 1 - bottom_guard)))
+        if left_guard_area > 0:
+            left_overlap = max(left_overlap, _polygon_rectangle_overlap_ratio(clipped_points, left_guard_rect, left_guard_area))
+        if bottom_guard_area > 0:
+            bottom_overlap = max(bottom_overlap, _polygon_rectangle_overlap_ratio(clipped_points, bottom_guard_rect, bottom_guard_area))
 
     blocking = left_overlap >= 0.05 or bottom_overlap >= 0.05
     warning = not blocking and (left_overlap > 0 or bottom_overlap > 0)
@@ -659,6 +705,89 @@ def _safe_ratio(numerator: int, denominator: int) -> float | None:
     if denominator <= 0:
         return None
     return numerator / denominator
+
+
+def clamp_ratio(value: float) -> float:
+    return max(0.0, min(1.0, value))
+
+
+def _rect_area(left: float, top: float, right: float, bottom: float) -> float:
+    return max(0.0, right - left) * max(0.0, bottom - top)
+
+
+def _rect_intersection_area(rect_a: tuple[float, float, float, float], rect_b: tuple[float, float, float, float]) -> float:
+    left = max(rect_a[0], rect_b[0])
+    top = max(rect_a[1], rect_b[1])
+    right = min(rect_a[2], rect_b[2])
+    bottom = min(rect_a[3], rect_b[3])
+    return _rect_area(left, top, right, bottom)
+
+
+def _polygon_rectangle_overlap_ratio(
+    points: list[tuple[float, float]],
+    rect: tuple[float, float, float, float],
+    rect_area: float,
+) -> float:
+    if rect_area <= 0 or len(points) < 3:
+        return 0.0
+
+    clipped = _clip_polygon_to_rect(points, rect)
+    if len(clipped) < 3:
+        return 0.0
+    return min(1.0, _polygon_area_xy(clipped) / rect_area)
+
+
+def _clip_polygon_to_rect(
+    points: list[tuple[float, float]],
+    rect: tuple[float, float, float, float],
+) -> list[tuple[float, float]]:
+    left, top, right, bottom = rect
+
+    def clip(points_to_clip: list[tuple[float, float]], inside, intersect):
+        if not points_to_clip:
+            return []
+        output: list[tuple[float, float]] = []
+        previous = points_to_clip[-1]
+        previous_inside = inside(previous)
+        for current in points_to_clip:
+            current_inside = inside(current)
+            if current_inside:
+                if not previous_inside:
+                    output.append(intersect(previous, current))
+                output.append(current)
+            elif previous_inside:
+                output.append(intersect(previous, current))
+            previous = current
+            previous_inside = current_inside
+        return output
+
+    def intersect_vertical(a: tuple[float, float], b: tuple[float, float], x_value: float) -> tuple[float, float]:
+        if b[0] == a[0]:
+            return (x_value, a[1])
+        ratio = (x_value - a[0]) / (b[0] - a[0])
+        return (x_value, a[1] + ratio * (b[1] - a[1]))
+
+    def intersect_horizontal(a: tuple[float, float], b: tuple[float, float], y_value: float) -> tuple[float, float]:
+        if b[1] == a[1]:
+            return (a[0], y_value)
+        ratio = (y_value - a[1]) / (b[1] - a[1])
+        return (a[0] + ratio * (b[0] - a[0]), y_value)
+
+    clipped = clip(points, lambda point: point[0] >= left, lambda a, b: intersect_vertical(a, b, left))
+    clipped = clip(clipped, lambda point: point[0] <= right, lambda a, b: intersect_vertical(a, b, right))
+    clipped = clip(clipped, lambda point: point[1] >= top, lambda a, b: intersect_horizontal(a, b, top))
+    clipped = clip(clipped, lambda point: point[1] <= bottom, lambda a, b: intersect_horizontal(a, b, bottom))
+    return clipped
+
+
+def _polygon_area_xy(points: list[tuple[float, float]]) -> float:
+    if len(points) < 3:
+        return 0.0
+    area = 0.0
+    for index, point in enumerate(points):
+        next_point = points[(index + 1) % len(points)]
+        area += (point[0] * next_point[1]) - (next_point[0] * point[1])
+    return abs(area) / 2.0
 
 
 def _polygon_area(points) -> float:

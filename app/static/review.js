@@ -28,6 +28,7 @@
         const zoomFitButton = document.getElementById("zoom-fit-button");
         const zoomSlider = document.getElementById("zoom-slider");
         const zoomReadout = document.getElementById("zoom-readout");
+        const rerunButton = document.getElementById("manual-rerun-button");
         const inputs = {
             left: document.getElementById("crop-left-input"),
             top: document.getElementById("crop-top-input"),
@@ -39,7 +40,7 @@
             !image || !stage || !viewport || !overlay || !svg || !selection || !polygonGroup ||
             !activePolygon || !previewCanvas || !clearCropButton || !cropModeButton ||
             !polygonModeButton || !clearLastPolygonButton || !clearAllPolygonsButton ||
-            !polygonField || !zoomOutButton || !zoomInButton || !zoomFitButton ||
+            !polygonField || !zoomOutButton || !zoomInButton || !zoomFitButton || !rerunButton ||
             !zoomSlider || !zoomReadout || Object.values(inputs).some(function (input) { return !input; })
         ) {
             return;
@@ -83,6 +84,23 @@
             zoomReadout.textContent = Math.round(zoomPercent) + "%";
         }
 
+        function hasCropSelection() {
+            const leftValue = parseFloat(inputs.left.value);
+            const topValue = parseFloat(inputs.top.value);
+            const rightValue = parseFloat(inputs.right.value);
+            const bottomValue = parseFloat(inputs.bottom.value);
+            return ![leftValue, topValue, rightValue, bottomValue].some(function (value) { return Number.isNaN(value); });
+        }
+
+        function updatePrimaryActionState() {
+            const cropRequired = polygons.length > 0 && !hasCropSelection();
+            rerunButton.disabled = cropRequired;
+            rerunButton.textContent = cropRequired ? "Draw Crop First" : "Use Crop and Rerun";
+            rerunButton.title = cropRequired
+                ? "Draw a crop rectangle around the plot panel before rerunning with large masks."
+                : "";
+        }
+
         function setMode(nextMode) {
             mode = nextMode;
             cropModeButton.dataset.active = String(mode === "crop");
@@ -92,6 +110,7 @@
             overlay.dataset.mode = mode;
             clearLastPolygonButton.disabled = polygons.length === 0 && activePolygonPoints.length === 0;
             clearAllPolygonsButton.disabled = polygons.length === 0;
+            updatePrimaryActionState();
         }
 
         function clearActivePolygon() {
@@ -129,10 +148,12 @@
             selection.setAttribute("y", top);
             selection.setAttribute("width", Math.max(1, right - left));
             selection.setAttribute("height", Math.max(1, bottom - top));
+            updatePrimaryActionState();
         }
 
         function hideSelection() {
             selection.style.display = "none";
+            updatePrimaryActionState();
         }
 
         function syncCropFromInputs() {
@@ -185,6 +206,7 @@
             activePolygon.setAttribute("points", activePoints);
             clearLastPolygonButton.disabled = polygons.length === 0 && activePolygonPoints.length === 0;
             clearAllPolygonsButton.disabled = polygons.length === 0;
+            updatePrimaryActionState();
             renderPreview();
         }
 
@@ -398,6 +420,7 @@
             input.addEventListener("input", function () {
                 syncCropFromInputs();
                 renderPreview();
+                updatePrimaryActionState();
             });
         });
 
@@ -412,6 +435,7 @@
         syncCropFromInputs();
         applyZoom();
         setMode("crop");
+        updatePrimaryActionState();
 
         function renderPreview() {
             const context = previewCanvas.getContext("2d");
