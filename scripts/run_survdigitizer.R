@@ -80,6 +80,52 @@ collapse_break_matches <- function(break_positions, label_table, start_col, end_
   pxl_loc
 }
 
+dominant_break_spacing <- function(break_positions) {
+  positions <- sort(unique(as.numeric(break_positions)))
+  positions <- positions[is.finite(positions)]
+  if (length(positions) < 2) {
+    return(NA_real_)
+  }
+
+  diffs <- diff(positions)
+  diffs <- diffs[is.finite(diffs) & diffs > 0]
+  if (length(diffs) == 0) {
+    return(NA_real_)
+  }
+
+  diff_table <- sort(table(round(diffs)), decreasing = TRUE)
+  as.numeric(names(diff_table)[1])
+}
+
+fallback_axis_origin <- function(break_positions, actual_ticks, tick_increment, axis_pixel_length = NULL, default_origin_pixel = 0) {
+  positions <- sort(unique(as.numeric(break_positions)))
+  positions <- positions[is.finite(positions)]
+  pixel_increment <- dominant_break_spacing(positions)
+
+  if ((!is.finite(pixel_increment) || pixel_increment <= 0) &&
+      !is.null(axis_pixel_length) &&
+      is.finite(axis_pixel_length) &&
+      axis_pixel_length > 1 &&
+      length(actual_ticks) > 1) {
+    pixel_increment <- (axis_pixel_length - 1) / (length(actual_ticks) - 1)
+  }
+
+  if (length(positions) == (length(actual_ticks) - 1) && is.finite(pixel_increment)) {
+    positions <- c(positions[1] - pixel_increment, positions)
+  }
+
+  if (length(positions) == 0) {
+    origin_pixel <- default_origin_pixel - (actual_ticks[1] / tick_increment) * pixel_increment
+    return(list(origin_pixel = origin_pixel, pixel_increment = pixel_increment))
+  }
+
+  anchor_value <- actual_ticks[1]
+  anchor_pixel <- positions[1]
+  origin_pixel <- anchor_pixel - (anchor_value / tick_increment) * pixel_increment
+
+  list(origin_pixel = origin_pixel, pixel_increment = pixel_increment)
+}
+
 safe_range_detect <- function(step1_fig, step2_axes, x_start, x_end, x_increment, y_start, y_increment, y_end, y_text_vertical) {
   X_actual <- seq(x_start, x_end, by = x_increment)
   Y_actual <- seq(y_start, y_end, by = y_increment)
@@ -95,10 +141,10 @@ safe_range_detect <- function(step1_fig, step2_axes, x_start, x_end, x_increment
 
   loc_of_breaks_x <- which(fig_x[(loc_y_start - 1), ] < 0.9)
   loc_of_breaks_x <- loc_of_breaks_x[c(0, diff(loc_of_breaks_x)) != 1]
-  x_pixels_increment <- as.numeric(names(which.max(table(diff(loc_of_breaks_x)))))
-
-  if (length(loc_of_breaks_x) == length(X_actual) - 1) {
-    loc_of_breaks_x <- c(loc_of_breaks_x[1] - x_pixels_increment, loc_of_breaks_x)
+  x_break_fallback <- fallback_axis_origin(loc_of_breaks_x, X_actual, x_increment, axis_pixel_length = ncol(fig_x))
+  x_pixels_increment <- x_break_fallback$pixel_increment
+  if (!is.finite(x_pixels_increment) || x_pixels_increment <= 0) {
+    stop("Could not infer x-axis tick spacing from detected breaks.", call. = FALSE)
   }
 
   xaxis_cimg <- imager::as.cimg(fig_x[loc_y_start:1, ])
@@ -116,7 +162,12 @@ safe_range_detect <- function(step1_fig, step2_axes, x_start, x_end, x_increment
     x1.tbl <- x1.tbl[which(abs(x1.tbl$y0 - loc_y_start) <= (mean_dist + 10)), ]
   }
 
-  if (length(loc_of_breaks_x) == 1 || (length(loc_of_breaks_x) * 2 < length(X_actual))) {
+  if (nrow(x1.tbl) == 0) {
+    X_0pixel <- x_break_fallback$origin_pixel
+  } else if (length(loc_of_breaks_x) == 1 || (length(loc_of_breaks_x) * 2 < length(X_actual))) {
+    if (nrow(x1.tbl) < 2) {
+      X_0pixel <- x_break_fallback$origin_pixel
+    } else {
     max_conf_ind <- which(sort(x1.tbl$confidence, index.return = TRUE, decreasing = TRUE)$ix == 1)
     max_conf_ind2 <- which(sort(x1.tbl$confidence, index.return = TRUE, decreasing = TRUE)$ix == 2)
     word_diff <- abs(as.numeric(x1.tbl$word[max_conf_ind2]) - as.numeric(x1.tbl$word[max_conf_ind]))
@@ -128,6 +179,7 @@ safe_range_detect <- function(step1_fig, step2_axes, x_start, x_end, x_increment
     x1.tbl <- x1.tbl[max_conf_ind, ]
     pxl_loc <- (x1.tbl$x0 + x1.tbl$x1) / 2
     X_0pixel <- (length(seq(0, x1.tbl$word, by = x_increment)) - 1) * x_pixels_increment - pxl_loc
+    }
   } else {
     x1.tbl$pxl_loc <- collapse_break_matches(loc_of_breaks_x, x1.tbl, "x0", "x1")
     break_length <- length(loc_of_breaks_x)
@@ -156,9 +208,16 @@ safe_range_detect <- function(step1_fig, step2_axes, x_start, x_end, x_increment
         x1.tbl <- x1.tbl[1, ]
         X_0pixel <- (length(seq(0, x1.tbl$word, by = x_increment)) - 1) * x_pixels_increment - x1.tbl$pxl_loc
       } else {
-        X_0pixel <- min(loc_of_breaks_x)
+        X_0pixel <- x_break_fallback$origin_pixel
       }
     }
+  }
+
+  if (!is.finite(X_0pixel)) {
+    X_0pixel <- x_break_fallback$origin_pixel
+  }
+  if (!is.finite(X_0pixel)) {
+    stop("Could not infer x-axis origin from OCR labels or detected breaks.", call. = FALSE)
   }
 
   fig_y <- fig_bw[step2_axes$yaxis, -step2_axes$xaxis]
@@ -177,11 +236,10 @@ safe_range_detect <- function(step1_fig, step2_axes, x_start, x_end, x_increment
 
   y_breaks_loc <- y_breaks_act
   y_breaks <- y_breaks[y_breaks != 1]
-  break_indicator_y <- as.numeric(names(table(diff(y_breaks_act))))[which.max(table(diff(y_breaks_act)))]
-  break_indicator_y <- round(break_indicator_y)
-
-  if (length(y_breaks_act) == length(Y_actual) - 1) {
-    y_breaks_act <- c(y_breaks_act[1] - break_indicator_y, y_breaks_act)
+  y_break_fallback <- fallback_axis_origin(y_breaks_loc, Y_actual, y_increment, axis_pixel_length = nrow(fig_y))
+  break_indicator_y <- y_break_fallback$pixel_increment
+  if (!is.finite(break_indicator_y) || break_indicator_y <= 0) {
+    stop("Could not infer y-axis tick spacing from detected breaks.", call. = FALSE)
   }
 
   fig_y_cut <- fig_y[, (1:loc_x_start)]
@@ -220,7 +278,12 @@ safe_range_detect <- function(step1_fig, step2_axes, x_start, x_end, x_increment
     y1.tbl <- y1.tbl[rank(as.numeric(y1.tbl$word)), ]
   }
 
-  if (length(y_breaks_loc) == 1 || (length(y_breaks_loc) * 2 < length(Y_actual))) {
+  if (nrow(y1.tbl) == 0) {
+    Y_0pixel <- y_break_fallback$origin_pixel
+  } else if (length(y_breaks_loc) == 1 || (length(y_breaks_loc) * 2 < length(Y_actual))) {
+    if (nrow(y1.tbl) < 2) {
+      Y_0pixel <- y_break_fallback$origin_pixel
+    } else {
     max_conf_ind <- which(sort(y1.tbl$confidence, index.return = TRUE, decreasing = TRUE)$ix == 1)
     max_conf_ind2 <- which(sort(y1.tbl$confidence, index.return = TRUE, decreasing = TRUE)$ix == 2)
     word_diff <- abs(as.numeric(y1.tbl$word[max_conf_ind2]) - as.numeric(y1.tbl$word[max_conf_ind]))
@@ -233,22 +296,27 @@ safe_range_detect <- function(step1_fig, step2_axes, x_start, x_end, x_increment
     pxl_loc <- (y1.tbl$x0 + y1.tbl$x1) / 2
     Y_0pixel <- (length(seq(0, y1.tbl$word, by = y_increment)) - 1) * y_pixels_increment - pxl_loc
     break_indicator_y <- y_pixels_increment
+    }
   } else {
     if (dim(y1.tbl)[1] != 0) {
       y1.tbl$pxl_loc <- collapse_break_matches(y_breaks_loc, y1.tbl, "x0", "x1")
       if (nrow(y1.tbl) >= 2) {
         y1.tbl <- y1.tbl[!is.na(y1.tbl$pxl_loc), ]
-        word_diff <- abs(as.numeric(y1.tbl$word[2]) - as.numeric(y1.tbl$word[1]))
-        pix_diff <- as.numeric(y1.tbl$pxl_loc[2]) - as.numeric(y1.tbl$pxl_loc[1])
-        y_pixels_increment <- pix_diff / (word_diff / y_increment)
-        y1.tbl.multiple <- y1.tbl
-        y1.tbl <- y1.tbl[which.max(y1.tbl$confidence), ]
-        Y_0pixel <- (length(seq(0, y1.tbl$word, by = y_increment)) - 1) * y_pixels_increment - y1.tbl$pxl_loc
-        if (length(y_breaks_loc) >= (length(Y_actual) * 2 - 2)) {
-          match_increment <- y1.tbl.multiple[(y1.tbl.multiple$x0 < y_pixels_increment & y1.tbl.multiple$x1 > y_pixels_increment), ]
-          if (nrow(match_increment) == 1) {
-            break_indicator_y <- match_increment$pxl_loc
+        if (nrow(y1.tbl) >= 2) {
+          word_diff <- abs(as.numeric(y1.tbl$word[2]) - as.numeric(y1.tbl$word[1]))
+          pix_diff <- as.numeric(y1.tbl$pxl_loc[2]) - as.numeric(y1.tbl$pxl_loc[1])
+          y_pixels_increment <- pix_diff / (word_diff / y_increment)
+          y1.tbl.multiple <- y1.tbl
+          y1.tbl <- y1.tbl[which.max(y1.tbl$confidence), ]
+          Y_0pixel <- (length(seq(0, y1.tbl$word, by = y_increment)) - 1) * y_pixels_increment - y1.tbl$pxl_loc
+          if (length(y_breaks_loc) >= (length(Y_actual) * 2 - 2)) {
+            match_increment <- y1.tbl.multiple[(y1.tbl.multiple$x0 < y_pixels_increment & y1.tbl.multiple$x1 > y_pixels_increment), ]
+            if (nrow(match_increment) == 1) {
+              break_indicator_y <- match_increment$pxl_loc
+            }
           }
+        } else {
+          Y_0pixel <- y_break_fallback$origin_pixel
         }
       } else {
         y1.tbl <- y1.tbl[which.max(y1.tbl$confidence), ]
@@ -272,6 +340,13 @@ safe_range_detect <- function(step1_fig, step2_axes, x_start, x_end, x_increment
         Y_0pixel <- min(y_breaks_loc)
       }
     }
+  }
+
+  if (!is.finite(Y_0pixel)) {
+    Y_0pixel <- y_break_fallback$origin_pixel
+  }
+  if (!is.finite(Y_0pixel)) {
+    stop("Could not infer y-axis origin from OCR labels or detected breaks.", call. = FALSE)
   }
 
   list(
