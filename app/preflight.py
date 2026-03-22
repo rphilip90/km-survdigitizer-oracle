@@ -486,6 +486,12 @@ def _build_range_checks(metrics: dict, stage_errors: list[dict]) -> list[Preflig
     expected_y = int(metrics.get("expected_y_ticks") or 0)
     detected_x = int(metrics.get("detected_x_breaks") or 0)
     detected_y = int(metrics.get("detected_y_breaks") or 0)
+    x_pixels_increment = _safe_float(metrics.get("x_pixels_increment"))
+    y_pixels_increment = _safe_float(metrics.get("y_pixels_increment"))
+    geometric_fallback_ready = (
+        x_pixels_increment is not None and x_pixels_increment > 0
+        and y_pixels_increment is not None and y_pixels_increment > 0
+    )
 
     x_ratio = _safe_ratio(detected_x, expected_x)
     y_ratio = _safe_ratio(detected_y, expected_y)
@@ -497,9 +503,21 @@ def _build_range_checks(metrics: dict, stage_errors: list[dict]) -> list[Preflig
         "detected_y_breaks": detected_y,
         "x_break_ratio": round(x_ratio, 4) if x_ratio is not None else None,
         "y_break_ratio": round(y_ratio, 4) if y_ratio is not None else None,
+        "x_pixels_increment": round(x_pixels_increment, 4) if x_pixels_increment is not None else None,
+        "y_pixels_increment": round(y_pixels_increment, 4) if y_pixels_increment is not None else None,
     }
 
     if detected_x == 0 or detected_y == 0:
+        if geometric_fallback_ready:
+            return [
+                _check(
+                    "range-break-match",
+                    "range_preflight",
+                    "warn",
+                    "Tick-label detection is sparse, but geometric axis spacing was inferred successfully. Manual review is still recommended before final extraction.",
+                    evidence=evidence,
+                )
+            ]
         return [
             _check(
                 "range-break-match",
@@ -511,6 +529,16 @@ def _build_range_checks(metrics: dict, stage_errors: list[dict]) -> list[Preflig
         ]
 
     if (x_ratio is not None and x_ratio < 0.5) or (y_ratio is not None and y_ratio < 0.5):
+        if geometric_fallback_ready:
+            return [
+                _check(
+                    "range-break-match",
+                    "range_preflight",
+                    "warn",
+                    "Tick-label detection is incomplete, but geometric axis spacing was inferred successfully. Confirm the axis settings, then extraction can continue.",
+                    evidence=evidence,
+                )
+            ]
         return [
             _check(
                 "range-break-match",
@@ -705,6 +733,16 @@ def _safe_ratio(numerator: int, denominator: int) -> float | None:
     if denominator <= 0:
         return None
     return numerator / denominator
+
+
+def _safe_float(value: object) -> float | None:
+    try:
+        numeric_value = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(numeric_value):
+        return None
+    return numeric_value
 
 
 def clamp_ratio(value: float) -> float:

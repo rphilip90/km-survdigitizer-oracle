@@ -172,6 +172,23 @@ class PreflightReportTests(unittest.TestCase):
         self.assertTrue(report.blocking)
         self.assertTrue(any(check.stage == "range_preflight" and check.status == "fail" for check in report.checks))
 
+    def test_warns_when_geometric_spacing_exists_even_if_break_counts_are_sparse(self) -> None:
+        payload = {
+            **self.base_payload,
+            "metrics": {
+                **self.base_payload["metrics"],
+                "detected_x_breaks": 1,
+                "detected_y_breaks": 1,
+                "x_pixels_increment": 44.1667,
+                "y_pixels_increment": 67.6,
+            },
+        }
+
+        report = build_preflight_report(self.manifest, self.prepared_path, payload)
+
+        self.assertFalse(report.blocking)
+        self.assertTrue(any(check.stage == "range_preflight" and check.status == "warn" for check in report.checks))
+
 
 if __name__ == "__main__":
     unittest.main()
