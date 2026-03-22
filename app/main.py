@@ -124,6 +124,7 @@ def batch_detail(request: Request, batch_id: str):
         {
             "request": request,
             "batch": batch,
+            "batch_runtime_progress": build_batch_runtime_progress(batch),
         },
     )
 
@@ -155,6 +156,7 @@ def image_detail(request: Request, image_id: str):
             "image": image,
             "batch": batch,
             "review_workflow": review_workflow,
+            "runtime_progress": build_image_runtime_progress(image),
         },
     )
 
@@ -793,6 +795,103 @@ def build_blocker_hint(blocking_check: dict | None) -> str:
         ),
     }
     return blocker_hints.get(blocker_id, blocker_message)
+
+
+def build_image_runtime_progress(image: dict) -> dict | None:
+    status = image.get("status")
+    if status not in {"queued", "processing_manifest", "processing_digitizer"}:
+        return None
+
+    latest_log = image.get("latest_log") or {}
+    latest_stage = (latest_log.get("stage") or "").lower()
+    current_stage = "queued"
+    if status == "processing_digitizer":
+        current_stage = "digitizer"
+    elif latest_stage == "processing_preflight":
+        current_stage = "preflight"
+    elif status == "processing_manifest":
+        current_stage = "manifest"
+
+    order = ["queued", "manifest", "preflight", "digitizer", "completed"]
+    labels = {
+        "queued": "Queued",
+        "manifest": "Read Figure",
+        "preflight": "Check Crop + Axes",
+        "digitizer": "Extract Curves",
+        "completed": "Results Ready",
+    }
+    progress_map = {
+        "queued": 8,
+        "manifest": 32,
+        "preflight": 56,
+        "digitizer": 82,
+        "completed": 100,
+    }
+    headline_map = {
+        "queued": "Queued for the next worker slot",
+        "manifest": "Reading figure structure and axis settings",
+        "preflight": "Running pre-flight checks before extraction",
+        "digitizer": "Extracting curves and writing artifacts",
+        "completed": "Results are ready",
+    }
+    detail = latest_log.get("message") or (
+        "This page refreshes automatically while the run is active."
+    )
+    current_index = order.index(current_stage)
+    steps = [
+        {
+            "id": step_id,
+            "label": labels[step_id],
+            "state": "done" if index < current_index else "current" if index == current_index else "pending",
+        }
+        for index, step_id in enumerate(order)
+    ]
+    return {
+        "headline": headline_map[current_stage],
+        "detail": detail,
+        "progress_percent": progress_map[current_stage],
+        "steps": steps,
+        "refresh_seconds": 5,
+    }
+
+
+def build_batch_runtime_progress(batch: dict) -> dict | None:
+    if batch.get("status") not in {"queued", "processing"}:
+        return None
+
+    images = batch.get("images") or []
+    queued_count = sum(1 for image in images if image.get("status") == "queued")
+    manifest_count = sum(1 for image in images if image.get("status") == "processing_manifest")
+    digitizer_count = sum(1 for image in images if image.get("status") == "processing_digitizer")
+    review_count = sum(1 for image in images if image.get("status") == "needs_review")
+    completed_count = sum(1 for image in images if image.get("status") == "completed")
+
+    if manifest_count > 0:
+        headline = "Reading uploaded figures"
+    elif digitizer_count > 0:
+        headline = "Running extraction across the batch"
+    elif queued_count > 0:
+        headline = "Queued images are waiting to start"
+    else:
+        headline = "Refreshing batch state"
+
+    detail_parts = []
+    if manifest_count:
+        detail_parts.append(f"{manifest_count} reading figure structure")
+    if digitizer_count:
+        detail_parts.append(f"{digitizer_count} extracting curves")
+    if queued_count:
+        detail_parts.append(f"{queued_count} queued")
+    if review_count:
+        detail_parts.append(f"{review_count} in review")
+    if completed_count:
+        detail_parts.append(f"{completed_count} completed")
+
+    return {
+        "headline": headline,
+        "detail": " · ".join(detail_parts) if detail_parts else "Batch state is being refreshed.",
+        "refresh_seconds": 5,
+    }
 
 
 def build_review_message(

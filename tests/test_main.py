@@ -357,6 +357,28 @@ class MainFlowTests(unittest.TestCase):
         self.assertIn("progress-bar", response.text)
         self.assertIn("Ready results", response.text)
 
+    def test_batch_page_shows_live_refresh_progress_when_processing(self) -> None:
+        update_image(self.settings, self.image_id, status="processing_manifest")
+
+        with TestClient(main.app) as client:
+            response = client.get(f"/batches/{self.batch_id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("data-live-progress", response.text)
+        self.assertIn("Refreshing in", response.text)
+        self.assertIn("live-refresh-fill", response.text)
+
+    def test_image_page_shows_live_run_progress_when_processing(self) -> None:
+        update_image(self.settings, self.image_id, status="processing_digitizer")
+
+        with TestClient(main.app) as client:
+            response = client.get(f"/images/{self.image_id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("data-live-progress", response.text)
+        self.assertIn("Extracting curves and writing artifacts", response.text)
+        self.assertIn("live-stage-current", response.text)
+
     def test_process_single_image_logs_review_pause(self) -> None:
         manifest = ImageManifest(
             image_id=self.image_id,

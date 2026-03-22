@@ -90,7 +90,21 @@
     {% if batch.status in ["queued", "processing"] %}
     <div class="state-banner state-banner-processing">
         <strong>Work in progress.</strong>
-        <span>This page refreshes automatically every 5 seconds while the batch is active.</span>
+        {% if batch_runtime_progress %}
+        <div class="live-progress-card" data-live-progress data-refresh-seconds="{{ batch_runtime_progress.refresh_seconds }}">
+            <div class="live-progress-head">
+                <strong>{{ batch_runtime_progress.headline }}</strong>
+                <span class="live-progress-countdown">Refreshing in <span data-countdown>{{ batch_runtime_progress.refresh_seconds }}.0s</span></span>
+            </div>
+            <div class="live-progress-meta">
+                <span>{{ batch_runtime_progress.detail }}</span>
+                <span>Auto-refresh stays active while this batch is still running.</span>
+            </div>
+            <div class="live-refresh-track" aria-label="Auto refresh countdown">
+                <span class="live-refresh-fill" data-refresh-fill></span>
+            </div>
+        </div>
+        {% endif %}
         {% if stage.manifest %}
         <span>{{ stage.manifest }} image{{ "" if stage.manifest == 1 else "s" }} currently in manifest generation.</span>
         {% endif %}
@@ -168,11 +182,5 @@
         </table>
     </div>
 </section>
-{% if batch.status in ["queued", "processing"] %}
-<script>
-window.setTimeout(function () {
-    window.location.reload();
-}, 5000);
-</script>
-{% endif %}
+<script src="{{ url_for('static', path='/live-progress.js') }}"></script>
 {% endblock %}

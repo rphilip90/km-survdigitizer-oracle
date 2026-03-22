@@ -30,9 +30,28 @@
     {% if image.status in ["queued", "processing_manifest", "processing_digitizer"] %}
     <div class="state-banner state-banner-processing">
         <strong>Work in progress.</strong>
-        <span>This page refreshes automatically every 5 seconds while the image is running.</span>
-        {% if image.latest_log %}
-        <span>{{ image.latest_log.message }}</span>
+        {% if runtime_progress %}
+        <div class="live-progress-card" data-live-progress data-refresh-seconds="{{ runtime_progress.refresh_seconds }}">
+            <div class="live-progress-head">
+                <strong>{{ runtime_progress.headline }}</strong>
+                <span class="live-progress-countdown">Refreshing in <span data-countdown>{{ runtime_progress.refresh_seconds }}.0s</span></span>
+            </div>
+            <div class="run-progress-track" aria-label="Image run progress">
+                <span class="run-progress-fill" style="width: {{ runtime_progress.progress_percent }}%"></span>
+            </div>
+            <div class="live-progress-meta">
+                <span>{{ runtime_progress.detail }}</span>
+                <span>{{ runtime_progress.progress_percent }}% through the workflow</span>
+            </div>
+            <div class="live-stage-list">
+                {% for step in runtime_progress.steps %}
+                <span class="live-stage live-stage-{{ step.state }}">{{ step.label }}</span>
+                {% endfor %}
+            </div>
+            <div class="live-refresh-track" aria-label="Auto refresh countdown">
+                <span class="live-refresh-fill" data-refresh-fill></span>
+            </div>
+        </div>
         {% endif %}
     </div>
     {% endif %}
@@ -348,12 +367,6 @@
     <p class="panel-hint">No processing events recorded yet.</p>
     {% endif %}
 </section>
-{% if image.status in ["queued", "processing_manifest", "processing_digitizer"] %}
-<script>
-window.setTimeout(function () {
-    window.location.reload();
-}, 5000);
-</script>
-{% endif %}
 <script src="{{ url_for('static', path='/review.js') }}"></script>
+<script src="{{ url_for('static', path='/live-progress.js') }}"></script>
 {% endblock %}
