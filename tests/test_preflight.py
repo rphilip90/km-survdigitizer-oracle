@@ -100,7 +100,7 @@ class PreflightReportTests(unittest.TestCase):
         self.assertTrue(report.blocking)
         self.assertTrue(any(check.id == "manifest-exclusions" and check.status == "fail" for check in report.checks))
 
-    def test_requires_crop_when_large_masks_exist_without_crop(self) -> None:
+    def test_requires_crop_when_any_masks_exist_without_crop(self) -> None:
         manifest = ImageManifest.model_validate(
             {
                 **self.manifest.model_dump(),
@@ -108,15 +108,13 @@ class PreflightReportTests(unittest.TestCase):
                 "crop_top": None,
                 "crop_right": None,
                 "crop_bottom": None,
-                "exclusion_polygons": [
+                "exclusion_regions": [
                     {
-                        "label": "bottom risk table",
-                        "points": [
-                            {"x": 0.05, "y": 0.6},
-                            {"x": 0.95, "y": 0.6},
-                            {"x": 0.9, "y": 0.98},
-                            {"x": 0.05, "y": 0.98},
-                        ],
+                        "left": 0.72,
+                        "top": 0.05,
+                        "right": 0.92,
+                        "bottom": 0.18,
+                        "label": "small summary block",
                     }
                 ],
             }

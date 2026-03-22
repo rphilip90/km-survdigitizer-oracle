@@ -14,6 +14,7 @@
         const overlay = document.getElementById("crop-editor-overlay");
         const svg = document.getElementById("crop-editor-svg");
         const selection = document.getElementById("crop-selection");
+        const regionGroup = document.getElementById("region-mask-group");
         const polygonGroup = document.getElementById("polygon-mask-group");
         const activePolygon = document.getElementById("active-polygon-mask");
         const previewCanvas = document.getElementById("cropped-preview-canvas");
@@ -22,6 +23,7 @@
         const polygonModeButton = document.getElementById("polygon-mode-button");
         const clearLastPolygonButton = document.getElementById("clear-last-polygon-mask");
         const clearAllPolygonsButton = document.getElementById("clear-all-polygon-masks");
+        const regionField = document.getElementById("exclusion-regions-input");
         const polygonField = document.getElementById("exclusion-polygons-input");
         const zoomOutButton = document.getElementById("zoom-out-button");
         const zoomInButton = document.getElementById("zoom-in-button");
@@ -29,6 +31,13 @@
         const zoomSlider = document.getElementById("zoom-slider");
         const zoomReadout = document.getElementById("zoom-readout");
         const rerunButton = document.getElementById("manual-rerun-button");
+        const workflowGuide = document.getElementById("workflow-guide");
+        const workflowMessage = document.getElementById("workflow-current-message");
+        const workflowBadge = document.getElementById("workflow-status-badge");
+        const stepCrop = document.getElementById("workflow-step-crop");
+        const stepMask = document.getElementById("workflow-step-mask");
+        const stepPreview = document.getElementById("workflow-step-preview");
+        const stepRerun = document.getElementById("workflow-step-rerun");
         const inputs = {
             left: document.getElementById("crop-left-input"),
             top: document.getElementById("crop-top-input"),
@@ -37,10 +46,10 @@
         };
 
         if (
-            !image || !stage || !viewport || !overlay || !svg || !selection || !polygonGroup ||
+            !image || !stage || !viewport || !overlay || !svg || !selection || !regionGroup || !polygonGroup ||
             !activePolygon || !previewCanvas || !clearCropButton || !cropModeButton ||
             !polygonModeButton || !clearLastPolygonButton || !clearAllPolygonsButton ||
-            !polygonField || !zoomOutButton || !zoomInButton || !zoomFitButton || !rerunButton ||
+            !polygonField || !regionField || !zoomOutButton || !zoomInButton || !zoomFitButton || !rerunButton ||
             !zoomSlider || !zoomReadout || Object.values(inputs).some(function (input) { return !input; })
         ) {
             return;
@@ -52,7 +61,17 @@
         let drawState = null;
         let zoomPercent = Number(zoomSlider.value) || 100;
         let fitScale = 1;
+        let regions = parseRegions();
         let polygons = parsePolygons();
+
+        function parseRegions() {
+            try {
+                const parsed = JSON.parse(regionField.value || "[]");
+                return Array.isArray(parsed) ? parsed : [];
+            } catch (error) {
+                return [];
+            }
+        }
 
         function parsePolygons() {
             try {
@@ -61,6 +80,10 @@
             } catch (error) {
                 return [];
             }
+        }
+
+        function writeRegions() {
+            regionField.value = JSON.stringify(regions, null, 2);
         }
 
         function writePolygons() {
@@ -92,13 +115,68 @@
             return ![leftValue, topValue, rightValue, bottomValue].some(function (value) { return Number.isNaN(value); });
         }
 
+        function hasAnyMasks() {
+            return regions.length > 0 || polygons.length > 0;
+        }
+
+        function setWorkflowStepState(node, state) {
+            if (!node) {
+                return;
+            }
+            node.className = "workflow-step workflow-step-" + state;
+        }
+
+        function updateWorkflowGuide() {
+            if (!workflowGuide || !workflowMessage || !workflowBadge) {
+                return;
+            }
+
+            const hasCrop = hasCropSelection();
+            const anyMasks = hasAnyMasks();
+            const blocking = workflowGuide.dataset.blocking === "true";
+            let message = workflowGuide.dataset.defaultMessage || "";
+            let badgeText = "ready";
+            let badgeClass = "completed";
+
+            setWorkflowStepState(stepCrop, hasCrop ? "done" : "active");
+            setWorkflowStepState(stepMask, anyMasks ? "done" : (hasCrop ? "ready" : "pending"));
+            setWorkflowStepState(stepPreview, hasCrop ? "ready" : "pending");
+            setWorkflowStepState(stepRerun, hasCrop ? "ready" : "pending");
+
+            if (anyMasks && !hasCrop) {
+                message = "Step 1: draw a crop box around the full KM panel first. Hidden saved masks can still block rerun until the crop is set.";
+                badgeText = "crop required";
+                badgeClass = "needs_review";
+            } else if (!hasCrop) {
+                message = "Step 1: draw one crop box around the KM panel. Keep the full x-axis, y-axis, tick marks, and axis labels inside the box.";
+                badgeText = "crop required";
+                badgeClass = "needs_review";
+            } else if (blocking) {
+                message = workflowGuide.dataset.blockerHint || message;
+                badgeText = "recheck needed";
+                badgeClass = "needs_review";
+            } else {
+                message = "The cropped preview looks ready. Use the main button to rerun extraction with these edits.";
+                badgeText = "ready";
+                badgeClass = "completed";
+            }
+
+            workflowMessage.textContent = message;
+            workflowBadge.textContent = badgeText;
+            workflowBadge.className = "status " + badgeClass;
+        }
+
         function updatePrimaryActionState() {
-            const cropRequired = polygons.length > 0 && !hasCropSelection();
+            const cropRequired = hasAnyMasks() && !hasCropSelection();
+            const needsRecheck = !cropRequired && workflowGuide && workflowGuide.dataset.blocking === "true";
             rerunButton.disabled = cropRequired;
-            rerunButton.textContent = cropRequired ? "Draw Crop First" : "Use Crop and Rerun";
+            rerunButton.textContent = cropRequired ? "Step 1: Draw Crop First" : (needsRecheck ? "Save Changes and Recheck" : "Use Crop and Rerun");
             rerunButton.title = cropRequired
-                ? "Draw a crop rectangle around the plot panel before rerunning with large masks."
-                : "";
+                ? "Draw a crop rectangle around the plot panel before rerunning with masks."
+                : needsRecheck
+                    ? "Save the current crop and mask edits, then rerun pre-flight."
+                    : "";
+            updateWorkflowGuide();
         }
 
         function setMode(nextMode) {
@@ -185,9 +263,23 @@
         }
 
         function renderPolygons() {
+            while (regionGroup.firstChild) {
+                regionGroup.removeChild(regionGroup.firstChild);
+            }
             while (polygonGroup.firstChild) {
                 polygonGroup.removeChild(polygonGroup.firstChild);
             }
+
+            regions.forEach(function (region) {
+                const rectNode = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+                const rect = overlayRect();
+                rectNode.setAttribute("x", region.left * rect.width);
+                rectNode.setAttribute("y", region.top * rect.height);
+                rectNode.setAttribute("width", Math.max(1, (region.right - region.left) * rect.width));
+                rectNode.setAttribute("height", Math.max(1, (region.bottom - region.top) * rect.height));
+                rectNode.setAttribute("class", "saved-region-mask");
+                regionGroup.appendChild(rectNode);
+            });
 
             polygons.forEach(function (polygon) {
                 const polygonNode = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
@@ -205,7 +297,7 @@
             }).join(" ");
             activePolygon.setAttribute("points", activePoints);
             clearLastPolygonButton.disabled = polygons.length === 0 && activePolygonPoints.length === 0;
-            clearAllPolygonsButton.disabled = polygons.length === 0;
+            clearAllPolygonsButton.disabled = polygons.length === 0 && regions.length === 0;
             updatePrimaryActionState();
             renderPreview();
         }
@@ -369,7 +461,9 @@
         });
 
         clearAllPolygonsButton.addEventListener("click", function () {
+            regions = [];
             polygons = [];
+            writeRegions();
             writePolygons();
             clearActivePolygon();
             renderPolygons();
@@ -413,6 +507,11 @@
         polygonField.addEventListener("input", function () {
             polygons = parsePolygons();
             clearActivePolygon();
+            renderPolygons();
+        });
+
+        regionField.addEventListener("input", function () {
+            regions = parseRegions();
             renderPolygons();
         });
 
@@ -463,6 +562,15 @@
             context.drawImage(image, sx, sy, sw, sh, 0, 0, sw, sh);
 
             context.save();
+            context.fillStyle = "rgba(255, 243, 205, 0.88)";
+            regions.forEach(function (region) {
+                const rx = (region.left * sourceWidth) - sx;
+                const ry = (region.top * sourceHeight) - sy;
+                const rw = (region.right - region.left) * sourceWidth;
+                const rh = (region.bottom - region.top) * sourceHeight;
+                context.fillRect(rx, ry, rw, rh);
+            });
+
             context.fillStyle = "rgba(255, 255, 255, 0.92)";
             polygons.forEach(function (polygon) {
                 const points = polygon.points || [];

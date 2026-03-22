@@ -132,13 +132,13 @@ def _build_manifest_checks(manifest: ImageManifest, metrics: dict, preview_paylo
             )
         )
 
-    if not has_crop and (manifest.exclusion_regions or manifest.exclusion_polygons) and float(metrics["mask_coverage_ratio"]) >= WARN_MASK_COVERAGE:
+    if not has_crop and (manifest.exclusion_regions or manifest.exclusion_polygons):
         checks.append(
             _check(
                 "manifest-crop-required",
                 "manifest_preflight",
                 "fail",
-                "Large exclusion masks are present but no crop rectangle is set. Draw a crop around the plot panel before rerun.",
+                "Masks are present but no crop rectangle is set. Draw a crop around the plot panel before rerun.",
                 evidence={
                     "mask_coverage_ratio": metrics["mask_coverage_ratio"],
                     "exclusion_polygons": metrics["exclusion_polygon_count"],

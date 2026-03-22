@@ -294,6 +294,50 @@ class MainFlowTests(unittest.TestCase):
         self.assertIn("manual crop recommended", response.text)
         self.assertIn("zoom-slider", response.text)
 
+    def test_image_review_page_explains_crop_first_when_masks_exist(self) -> None:
+        manifest = ImageManifest(
+            image_id=self.image_id,
+            filename="test.png",
+            num_curves=2,
+            x_start=0,
+            x_end=60,
+            x_increment=5,
+            y_start=0,
+            y_end=100,
+            y_increment=25,
+            y_text_vertical=True,
+            rotation=0,
+            exclusion_regions=[
+                {
+                    "left": 0.65,
+                    "top": 0.04,
+                    "right": 0.92,
+                    "bottom": 0.18,
+                    "label": "summary block",
+                }
+            ],
+            crop_hint="manual crop recommended: exclude summary block",
+            notes="workflow-smoke",
+            llm_confidence=0.52,
+            review_required=True,
+        )
+        update_image(
+            self.settings,
+            self.image_id,
+            manifest_json=serialize_manifest(manifest.model_dump()),
+            review_required=1,
+            status="needs_review",
+        )
+
+        with TestClient(main.app) as client:
+            response = client.get(f"/images/{self.image_id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("What To Do Next", response.text)
+        self.assertIn("Step 1: Draw Crop First", response.text)
+        self.assertIn("Masks are already saved, but the page still needs a crop box", response.text)
+        self.assertIn("exclusion-regions-input", response.text)
+
     def test_batch_page_shows_progress_panel(self) -> None:
         second_image_path = self.settings.upload_dir / "second.png"
         second_image_path.parent.mkdir(parents=True, exist_ok=True)

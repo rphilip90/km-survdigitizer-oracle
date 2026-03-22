@@ -42,6 +42,32 @@
     <div class="panel image-panel">
         <h2>Manual Crop Review</h2>
         <div class="crop-tool">
+            <div
+                id="workflow-guide"
+                class="workflow-guide"
+                data-blocking="{{ 'true' if review_workflow.blocking else 'false' }}"
+                data-default-message="{{ review_workflow.default_message }}"
+                data-blocker-hint="{{ review_workflow.blocker_hint }}"
+            >
+                <div class="workflow-guide-head">
+                    <div>
+                        <h3>What To Do Next</h3>
+                        <p id="workflow-current-message" class="workflow-current-message">{{ review_workflow.current_message }}</p>
+                    </div>
+                    <span id="workflow-status-badge" class="status {{ review_workflow.badge_class }}">{{ review_workflow.badge }}</span>
+                </div>
+                <div class="workflow-step-list">
+                    {% for step in review_workflow.steps %}
+                    <div id="workflow-step-{{ step.id }}" class="workflow-step workflow-step-{{ step.state }}">
+                        <div class="workflow-step-title">
+                            <span class="workflow-step-number">{{ loop.index }}</span>
+                            <strong>{{ step.title }}</strong>
+                        </div>
+                        <p>{{ step.body }}</p>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
             {% if manifest.crop_hint or review_flag %}
             <div class="crop-review-callout">
                 <strong>Manual crop check</strong>
@@ -75,6 +101,7 @@
                             <img src="/images/{{ image.id }}/raw" alt="{{ image.filename }}" class="crop-editor-image" id="source-image-preview">
                             <div class="crop-editor-overlay" id="crop-editor-overlay" aria-hidden="true">
                                 <svg id="crop-editor-svg" class="crop-editor-svg" preserveAspectRatio="none">
+                                    <g id="region-mask-group"></g>
                                     <g id="polygon-mask-group"></g>
                                     <polyline id="active-polygon-mask" class="active-polygon-mask"></polyline>
                                     <rect id="crop-selection" class="crop-selection"></rect>
@@ -89,7 +116,15 @@
                         <button type="button" id="clear-manual-crop" class="btn btn-small">Reset Crop</button>
                         <button type="button" id="clear-all-polygon-masks" class="btn btn-small">Reset Masks</button>
                     </div>
-                    <button type="submit" id="manual-rerun-button" form="manifest-review-form" name="rerun_after_save" value="true" class="btn btn-primary">Use Crop and Rerun</button>
+                    <button
+                        type="submit"
+                        id="manual-rerun-button"
+                        form="manifest-review-form"
+                        name="rerun_after_save"
+                        value="true"
+                        class="btn btn-primary"
+                        {% if review_workflow.primary_action_disabled %}disabled{% endif %}
+                    >{{ review_workflow.primary_action_label }}</button>
                 </div>
             </div>
         </div>
@@ -218,7 +253,7 @@
                 <summary>Advanced Mask JSON</summary>
                 <label>
                     <span>Exclusion Regions JSON</span>
-                    <textarea name="exclusion_regions_json" rows="5" placeholder='[{"left":0.62,"top":0.02,"right":0.98,"bottom":0.22,"label":"top summary"}]'>{{ manifest.exclusion_regions | tojson(indent=2) if manifest and manifest.exclusion_regions else '[]' }}</textarea>
+                    <textarea id="exclusion-regions-input" name="exclusion_regions_json" rows="5" placeholder='[{"left":0.62,"top":0.02,"right":0.98,"bottom":0.22,"label":"top summary"}]'>{{ manifest.exclusion_regions | tojson(indent=2) if manifest and manifest.exclusion_regions else '[]' }}</textarea>
                 </label>
                 <p class="panel-hint">Use exclusion regions only if you need to fine-tune rectangular masks numerically.</p>
                 <label>

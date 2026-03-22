@@ -147,12 +147,14 @@ def image_detail(request: Request, image_id: str):
     if not image:
         raise HTTPException(status_code=404, detail="Image not found")
     batch = get_batch(settings, image["batch_id"])
+    review_workflow = build_review_workflow(image)
     return templates.TemplateResponse(
         "image.html",
         {
             "request": request,
             "image": image,
             "batch": batch,
+            "review_workflow": review_workflow,
         },
     )
 
@@ -667,6 +669,130 @@ def first_blocking_message(preflight_report: dict | None) -> str:
         if check.get("status") == "fail":
             return check.get("message") or "Pre-flight checks require manual review before rerun."
     return "Pre-flight checks require manual review before rerun."
+
+
+def first_blocking_check(preflight_report: dict | None) -> dict | None:
+    if not preflight_report:
+        return None
+    for check in preflight_report.get("checks", []):
+        if check.get("status") == "fail":
+            return check
+    return None
+
+
+def build_review_workflow(image: dict) -> dict:
+    manifest = image.get("manifest") or {}
+    preflight_report = image.get("preflight_report") or {}
+    blocking_check = first_blocking_check(preflight_report)
+    has_crop = all(
+        manifest.get(field_name) is not None
+        for field_name in ("crop_left", "crop_top", "crop_right", "crop_bottom")
+    )
+    has_masks = bool(manifest.get("exclusion_regions") or manifest.get("exclusion_polygons"))
+
+    blocker_hint = build_blocker_hint(blocking_check)
+    default_message = (
+        "Start with one crop box around the KM panel. Keep the full x-axis, y-axis, tick marks, and axis labels inside it."
+        if not has_crop
+        else blocker_hint
+    )
+
+    if has_masks and not has_crop:
+        badge = "crop required"
+        badge_class = "needs_review"
+        primary_action_label = "Step 1: Draw Crop First"
+        current_message = (
+            "Masks are already saved, but the page still needs a crop box around the plot panel. "
+            "Until that crop exists, rerun will only pause in review again."
+        )
+        primary_action_disabled = True
+    elif preflight_report.get("blocking"):
+        badge = "recheck needed"
+        badge_class = "needs_review"
+        primary_action_label = "Save Changes and Recheck"
+        current_message = blocker_hint
+        primary_action_disabled = False
+    else:
+        badge = "ready"
+        badge_class = "completed"
+        primary_action_label = "Use Crop and Rerun"
+        current_message = (
+            "The crop and mask setup is ready. Use the main button to re-run pre-flight and continue into extraction."
+        )
+        primary_action_disabled = False
+
+    steps = [
+        {
+            "id": "crop",
+            "title": "Draw Crop",
+            "body": "Draw one crop box around the plot panel. Keep the full axes, tick marks, and axis labels inside the box.",
+            "state": "done" if has_crop else "active",
+        },
+        {
+            "id": "mask",
+            "title": "Mask Non-Plot Areas",
+            "body": "Use Mask only for risk tables, legends, summary blocks, or captions outside the plot panel.",
+            "state": "done" if has_masks else ("ready" if has_crop else "pending"),
+        },
+        {
+            "id": "preview",
+            "title": "Check The Preview",
+            "body": "The preview below should show only the plot panel you want extracted. If text or tables remain, tighten the crop or add masks.",
+            "state": "ready" if has_crop else "pending",
+        },
+        {
+            "id": "rerun",
+            "title": "Recheck And Run",
+            "body": "When the crop looks right, use the main button. If pre-flight still blocks, the blocker note above tells you what to correct next.",
+            "state": "ready" if has_crop else "pending",
+        },
+    ]
+
+    return {
+        "badge": badge,
+        "badge_class": badge_class,
+        "current_message": current_message,
+        "default_message": default_message,
+        "blocker_hint": blocker_hint,
+        "blocking": bool(preflight_report.get("blocking")),
+        "has_crop": has_crop,
+        "has_masks": has_masks,
+        "primary_action_label": primary_action_label,
+        "primary_action_disabled": primary_action_disabled,
+        "steps": steps,
+    }
+
+
+def build_blocker_hint(blocking_check: dict | None) -> str:
+    if not blocking_check:
+        return "Save changes to refresh the preview and pre-flight checks."
+
+    blocker_id = blocking_check.get("id")
+    blocker_message = blocking_check.get("message") or "Pre-flight checks require review."
+    blocker_hints = {
+        "manifest-crop-required": (
+            "Step 1: draw a crop box around the KM panel first. Keep the full axes inside the crop, then use masks only for material outside the plot."
+        ),
+        "manifest-exclusions": (
+            "Move or shrink the masks so they no longer touch the x-axis or y-axis guard bands. The axes and tick labels must stay visible."
+        ),
+        "prepared-axis-contact": (
+            "Widen the crop slightly. The detected plot is touching the image edge, which usually means the crop cut into the axis envelope."
+        ),
+        "axis-plot-size": (
+            "Crop tighter around the actual KM panel and remove tables or summary blocks with masks. The detected plot bounds are still collapsing."
+        ),
+        "axis-spans": (
+            "The plot detector is not finding a full x-axis or y-axis. Re-crop so the complete panel, including both axes, is inside the box."
+        ),
+        "range-break-match": (
+            "The crop now looks usable, but the axis settings still do not match the visible tick marks. Confirm the x/y limits and every visible tick increment."
+        ),
+        "range-detection": (
+            "The image reached range detection but the axis labels or breaks are still ambiguous. Tighten the crop around the plot and confirm the axis fields."
+        ),
+    }
+    return blocker_hints.get(blocker_id, blocker_message)
 
 
 def build_review_message(

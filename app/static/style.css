@@ -522,6 +522,88 @@ td {
     background: #eff6ff;
 }
 
+.workflow-guide {
+    display: grid;
+    gap: 0.9rem;
+    padding: 1rem 1.05rem;
+    border: 1px solid #cfe2f3;
+    border-radius: 16px;
+    background: linear-gradient(180deg, #f8fbff, #eef6ff);
+}
+
+.workflow-guide-head {
+    display: flex;
+    align-items: start;
+    justify-content: space-between;
+    gap: 0.9rem;
+    flex-wrap: wrap;
+}
+
+.workflow-guide-head h3 {
+    margin: 0 0 0.35rem;
+    font-size: 1.02rem;
+}
+
+.workflow-current-message {
+    margin: 0;
+    color: var(--text);
+    line-height: 1.5;
+}
+
+.workflow-step-list {
+    display: grid;
+    gap: 0.7rem;
+}
+
+.workflow-step {
+    display: grid;
+    gap: 0.3rem;
+    padding: 0.8rem 0.9rem;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    background: #fff;
+}
+
+.workflow-step-title {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+.workflow-step-number {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.7rem;
+    height: 1.7rem;
+    border-radius: 999px;
+    background: #e2e8f0;
+    color: var(--text);
+    font-size: 0.85rem;
+    font-weight: 800;
+}
+
+.workflow-step p {
+    margin: 0;
+    color: var(--muted);
+    line-height: 1.45;
+}
+
+.workflow-step-active,
+.workflow-step-ready {
+    border-color: #bfdbfe;
+    background: #f8fbff;
+}
+
+.workflow-step-done {
+    border-color: #86efac;
+    background: #ecfdf5;
+}
+
+.workflow-step-pending {
+    background: #f8fafc;
+}
+
 .crop-editor-shell {
     display: grid;
     gap: 0.9rem;
@@ -641,6 +723,13 @@ td {
     fill: rgba(239, 68, 68, 0.18);
     stroke: rgba(220, 38, 38, 0.95);
     stroke-width: 2;
+}
+
+.saved-region-mask {
+    fill: rgba(249, 115, 22, 0.18);
+    stroke: rgba(234, 88, 12, 0.95);
+    stroke-width: 2;
+    stroke-dasharray: 7 4;
 }
 
 .active-polygon-mask {
