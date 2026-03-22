@@ -31,6 +31,7 @@
         const zoomSlider = document.getElementById("zoom-slider");
         const zoomReadout = document.getElementById("zoom-readout");
         const rerunButton = document.getElementById("manual-rerun-button");
+        const maskUnlockMessage = document.getElementById("mask-unlock-message");
         const workflowGuide = document.getElementById("workflow-guide");
         const workflowMessage = document.getElementById("workflow-current-message");
         const workflowBadge = document.getElementById("workflow-status-badge");
@@ -166,8 +167,29 @@
             workflowBadge.className = "status " + badgeClass;
         }
 
+        function updateToolLockState() {
+            const cropReady = hasCropSelection();
+            if (!cropReady && mode === "polygon") {
+                mode = "crop";
+            }
+            cropModeButton.dataset.active = String(mode === "crop");
+            polygonModeButton.dataset.active = String(mode === "polygon");
+            cropModeButton.setAttribute("aria-pressed", String(mode === "crop"));
+            polygonModeButton.setAttribute("aria-pressed", String(mode === "polygon"));
+            overlay.dataset.mode = mode;
+            polygonModeButton.disabled = !cropReady;
+            polygonModeButton.title = cropReady ? "" : "Draw the crop box first to unlock Mask.";
+            if (maskUnlockMessage) {
+                maskUnlockMessage.textContent = cropReady
+                    ? "Mask is ready. Use it only for non-plot areas outside the main KM panel."
+                    : "Step 1 first: draw the crop box around the plot panel. Mask unlocks after the crop is set.";
+            }
+        }
+
         function updatePrimaryActionState() {
-            const cropRequired = hasAnyMasks() && !hasCropSelection();
+            const cropReady = hasCropSelection();
+            updateToolLockState();
+            const cropRequired = hasAnyMasks() && !cropReady;
             const needsRecheck = !cropRequired && workflowGuide && workflowGuide.dataset.blocking === "true";
             rerunButton.disabled = cropRequired;
             rerunButton.textContent = cropRequired ? "Step 1: Draw Crop First" : (needsRecheck ? "Save Changes and Recheck" : "Use Crop and Rerun");
@@ -180,6 +202,10 @@
         }
 
         function setMode(nextMode) {
+            if (nextMode === "polygon" && !hasCropSelection()) {
+                updatePrimaryActionState();
+                return;
+            }
             mode = nextMode;
             cropModeButton.dataset.active = String(mode === "crop");
             polygonModeButton.dataset.active = String(mode === "polygon");
@@ -361,6 +387,11 @@
             }
 
             if (mode === "polygon") {
+                if (!hasCropSelection()) {
+                    updatePrimaryActionState();
+                    event.preventDefault();
+                    return;
+                }
                 const start = pointPosition(event);
                 drawState = { points: [start] };
                 activePolygonPoints = [start];

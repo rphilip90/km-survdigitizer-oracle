@@ -80,8 +80,20 @@
                         <span class="toolbar-label">Tool</span>
                         <div class="segmented-control">
                             <button type="button" id="crop-mode-button" class="btn btn-small">Crop</button>
-                            <button type="button" id="polygon-mode-button" class="btn btn-small">Mask</button>
+                            <button
+                                type="button"
+                                id="polygon-mode-button"
+                                class="btn btn-small"
+                                {% if not review_workflow.has_crop %}disabled title="Draw the crop box first to unlock Mask."{% endif %}
+                            >Mask</button>
                         </div>
+                        <p id="mask-unlock-message" class="tool-lock-message">
+                            {% if review_workflow.has_crop %}
+                            Mask is ready. Use it only for non-plot areas outside the main KM panel.
+                            {% else %}
+                            Step 1 first: draw the crop box around the plot panel. Mask unlocks after the crop is set.
+                            {% endif %}
+                        </p>
                     </div>
                     <div class="crop-toolbar-group crop-toolbar-zoom">
                         <span class="toolbar-label">Zoom</span>

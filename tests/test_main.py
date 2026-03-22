@@ -337,6 +337,8 @@ class MainFlowTests(unittest.TestCase):
         self.assertIn("Step 1: Draw Crop First", response.text)
         self.assertIn("Masks are already saved, but the page still needs a crop box", response.text)
         self.assertIn("exclusion-regions-input", response.text)
+        self.assertIn("Mask unlocks after the crop is set", response.text)
+        self.assertIn("Draw the crop box first to unlock Mask.", response.text)
 
     def test_batch_page_shows_progress_panel(self) -> None:
         second_image_path = self.settings.upload_dir / "second.png"

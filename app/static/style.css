@@ -630,6 +630,14 @@ td {
     text-transform: uppercase;
 }
 
+.tool-lock-message {
+    margin: 0;
+    max-width: 28rem;
+    color: var(--muted);
+    font-size: 0.88rem;
+    line-height: 1.45;
+}
+
 .segmented-control,
 .zoom-controls,
 .crop-editor-actions,
