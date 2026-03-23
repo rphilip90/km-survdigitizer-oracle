@@ -164,6 +164,8 @@ class PreflightReportTests(unittest.TestCase):
                 **self.base_payload["metrics"],
                 "detected_x_breaks": 3,
                 "detected_y_breaks": 2,
+                "x_axis_pixel_span": None,
+                "y_axis_pixel_span": None,
             },
         }
 
@@ -188,6 +190,25 @@ class PreflightReportTests(unittest.TestCase):
 
         self.assertFalse(report.blocking)
         self.assertTrue(any(check.stage == "range_preflight" and check.status == "warn" for check in report.checks))
+
+    def test_warns_when_axis_spans_are_valid_even_if_only_one_axis_has_pixel_increment(self) -> None:
+        payload = {
+            **self.base_payload,
+            "metrics": {
+                **self.base_payload["metrics"],
+                "detected_x_breaks": 1,
+                "detected_y_breaks": 1,
+                "x_pixels_increment": "Inf",
+                "y_pixels_increment": 71.4,
+            },
+        }
+
+        report = build_preflight_report(self.manifest, self.prepared_path, payload)
+
+        self.assertFalse(report.blocking)
+        range_check = next(check for check in report.checks if check.stage == "range_preflight")
+        self.assertEqual(range_check.status, "warn")
+        self.assertEqual(range_check.evidence["range_fallback_mode"], "axis_span")
 
 
 if __name__ == "__main__":

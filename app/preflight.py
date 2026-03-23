@@ -488,10 +488,23 @@ def _build_range_checks(metrics: dict, stage_errors: list[dict]) -> list[Preflig
     detected_y = int(metrics.get("detected_y_breaks") or 0)
     x_pixels_increment = _safe_float(metrics.get("x_pixels_increment"))
     y_pixels_increment = _safe_float(metrics.get("y_pixels_increment"))
+    x_axis_span = _safe_float(metrics.get("x_axis_pixel_span"))
+    y_axis_span = _safe_float(metrics.get("y_axis_pixel_span"))
     geometric_fallback_ready = (
         x_pixels_increment is not None and x_pixels_increment > 0
         and y_pixels_increment is not None and y_pixels_increment > 0
     )
+    axis_span_fallback_ready = (
+        detected_x >= 1
+        and detected_y >= 1
+        and expected_x >= 2
+        and expected_y >= 2
+        and x_axis_span is not None
+        and x_axis_span >= MIN_AXIS_SPAN
+        and y_axis_span is not None
+        and y_axis_span >= MIN_AXIS_SPAN
+    )
+    range_calibration_ready = geometric_fallback_ready or axis_span_fallback_ready
 
     x_ratio = _safe_ratio(detected_x, expected_x)
     y_ratio = _safe_ratio(detected_y, expected_y)
@@ -505,6 +518,15 @@ def _build_range_checks(metrics: dict, stage_errors: list[dict]) -> list[Preflig
         "y_break_ratio": round(y_ratio, 4) if y_ratio is not None else None,
         "x_pixels_increment": round(x_pixels_increment, 4) if x_pixels_increment is not None else None,
         "y_pixels_increment": round(y_pixels_increment, 4) if y_pixels_increment is not None else None,
+        "x_axis_pixel_span": round(x_axis_span, 4) if x_axis_span is not None else None,
+        "y_axis_pixel_span": round(y_axis_span, 4) if y_axis_span is not None else None,
+        "range_fallback_mode": (
+            "full_geometry"
+            if geometric_fallback_ready
+            else "axis_span"
+            if axis_span_fallback_ready
+            else None
+        ),
     }
 
     if detected_x == 0 or detected_y == 0:
@@ -529,13 +551,16 @@ def _build_range_checks(metrics: dict, stage_errors: list[dict]) -> list[Preflig
         ]
 
     if (x_ratio is not None and x_ratio < 0.5) or (y_ratio is not None and y_ratio < 0.5):
-        if geometric_fallback_ready:
+        if range_calibration_ready:
             return [
                 _check(
                     "range-break-match",
                     "range_preflight",
                     "warn",
-                    "Tick-label detection is incomplete, but geometric axis spacing was inferred successfully. Confirm the axis settings, then extraction can continue.",
+                    (
+                        "Tick-label detection is incomplete, but range calibration still succeeded from the detected "
+                        "axis geometry. Confirm the axis settings, then extraction can continue."
+                    ),
                     evidence=evidence,
                 )
             ]
