@@ -9,6 +9,7 @@ from unittest import mock
 from fastapi.testclient import TestClient
 
 from app import main
+from app.runner import PreflightArtifacts
 from app.schemas import ImageManifest, PreflightCheck, PreflightReport
 from app.store import create_batch, create_image, get_image, init_db, serialize_manifest, update_batch, update_image
 from tests.test_store import make_settings
@@ -610,6 +611,95 @@ class MainFlowTests(unittest.TestCase):
 
         self.assertIn(f"annotated/{self.image_id}.png", names)
         self.assertIn(f"prepared/{self.image_id}.png", names)
+
+    def test_ensure_preflight_preview_applies_panel_crop_fallback_after_axis_failure(self) -> None:
+        manifest = ImageManifest(
+            image_id=self.image_id,
+            filename="test.png",
+            num_curves=2,
+            x_start=0,
+            x_end=72,
+            x_increment=6,
+            y_start=0,
+            y_end=100,
+            y_increment=20,
+            y_text_vertical=True,
+            rotation=0,
+            crop_hint=None,
+            notes=None,
+            llm_confidence=0.6,
+            review_required=False,
+        )
+
+        first_prepared = self.root / "first-prepared.png"
+        first_review = self.root / "first-review.png"
+        first_log = self.root / "first.log"
+        second_prepared = self.root / "second-prepared.png"
+        second_review = self.root / "second-review.png"
+        second_log = self.root / "second.log"
+        for path in [first_prepared, first_review, first_log, second_prepared, second_review, second_log]:
+            path.write_text("artifact", encoding="utf-8")
+
+        first_payload = {
+            "plot_bounds": None,
+            "metrics": {
+                "prepared_width": 958,
+                "prepared_height": 615,
+            },
+            "stage_errors": [
+                {
+                    "step": "Step 2: Identifying axes",
+                    "message": "'x' must be an array of at least two dimensions",
+                }
+            ],
+        }
+        second_payload = {
+            "plot_bounds": {"left": 78, "right": 543, "top": 24, "bottom": 381},
+            "metrics": {
+                "prepared_width": 580,
+                "prepared_height": 426,
+                "plot_width": 466,
+                "plot_height": 358,
+                "plot_aspect_ratio": 1.30,
+                "x_axis_pixel_span": 466,
+                "y_axis_pixel_span": 358,
+                "cleaned_object_count": 3668,
+                "adaptive_sampsize": 500,
+                "detected_x_breaks": 12,
+                "detected_y_breaks": 5,
+                "x_pixels_increment": 55.0,
+                "y_pixels_increment": 53.0,
+            },
+            "stage_errors": [],
+        }
+
+        side_effects = [
+            PreflightArtifacts(
+                prepared_path=first_prepared,
+                review_overlay_path=first_review,
+                preview_payload=first_payload,
+                output_log_path=first_log,
+            ),
+            PreflightArtifacts(
+                prepared_path=second_prepared,
+                review_overlay_path=second_review,
+                preview_payload=second_payload,
+                output_log_path=second_log,
+            ),
+        ]
+
+        with mock.patch.object(main.digitizer_runner, "run_preflight", side_effect=side_effects) as run_preflight:
+            preview_fields, report, _payload, effective_manifest = main.ensure_preflight_preview(
+                {"id": self.image_id, "batch_id": self.batch_id, "original_path": str(self.image_path)},
+                manifest,
+            )
+
+        self.assertFalse(report.blocking)
+        self.assertEqual(run_preflight.call_count, 2)
+        self.assertAlmostEqual(effective_manifest.crop_left or 0, 0.12)
+        self.assertAlmostEqual(effective_manifest.crop_bottom or 0, 0.64)
+        self.assertEqual(len(effective_manifest.exclusion_regions), 1)
+        self.assertEqual(Path(preview_fields["prepared_path"]), second_prepared)
 
 
 if __name__ == "__main__":

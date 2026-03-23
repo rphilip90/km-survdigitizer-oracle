@@ -16,7 +16,7 @@ from fastapi.templating import Jinja2Templates
 from .config import settings
 from .manifest_service import ManifestService
 from .preflight import build_preflight_report
-from .runner import DigitizerRunner
+from .runner import DigitizerRunner, PreflightArtifacts
 from .schemas import ImageManifest, PreflightReport
 from .store import (
     append_image_log,
@@ -250,8 +250,11 @@ async def save_review(
     )
 
     try:
-        preview_fields, report, preview_payload = ensure_preflight_preview(image, manifest)
-        saved_manifest = manifest.model_copy(update={"review_required": manifest.review_required or report.blocking})
+        preview_result = ensure_preflight_preview(image, manifest)
+        preview_fields, report, preview_payload, effective_manifest = unpack_preflight_result(preview_result, manifest)
+        saved_manifest = effective_manifest.model_copy(
+            update={"review_required": effective_manifest.review_required or report.blocking}
+        )
         next_status = "queued" if rerun_requested and not saved_manifest.review_required else "needs_review"
         error_message = build_review_message(saved_manifest, threshold, report, False)
         queued_runner = process_single_image
@@ -417,8 +420,11 @@ def process_single_image(image_id: str, regenerate_manifest: bool) -> None:
             manifest = ImageManifest.model_validate(image["manifest"])
             append_image_log(settings, image_id, "manifest_loaded", "Using the saved reviewed manifest.")
 
-        preview_fields, report, _ = ensure_preflight_preview(image, manifest)
-        manifest_for_run = manifest.model_copy(update={"review_required": manifest.review_required or report.blocking})
+        preview_result = ensure_preflight_preview(image, manifest)
+        preview_fields, report, _, effective_manifest = unpack_preflight_result(preview_result, manifest)
+        manifest_for_run = effective_manifest.model_copy(
+            update={"review_required": effective_manifest.review_required or report.blocking}
+        )
         requires_review = manifest_for_run.should_review(threshold) if regenerate_manifest else manifest_for_run.review_required
 
         if requires_review:
@@ -526,7 +532,10 @@ def process_prepared_image(image_id: str) -> None:
         append_image_log(settings, image_id, "failed", str(error), level="error")
 
 
-def ensure_preflight_preview(image: dict, manifest: ImageManifest) -> tuple[dict[str, str | None], PreflightReport, dict]:
+def ensure_preflight_preview(
+    image: dict,
+    manifest: ImageManifest,
+) -> tuple[dict[str, str | None], PreflightReport, dict, ImageManifest]:
     append_image_log(
         settings,
         image["id"],
@@ -544,6 +553,19 @@ def ensure_preflight_preview(image: dict, manifest: ImageManifest) -> tuple[dict
         prepared_path=artifacts.prepared_path,
         preview_payload=artifacts.preview_payload,
     )
+
+    effective_manifest = manifest
+    fallback = maybe_apply_panel_crop_fallback(image, manifest, report)
+    if fallback is not None:
+        effective_manifest, artifacts, report = fallback
+        append_image_log(
+            settings,
+            image["id"],
+            "crop_suggested",
+            "A suggested panel crop was prepared after full-image axis detection failed. Review the crop and rerun.",
+            level="warning",
+        )
+
     append_image_log(
         settings,
         image["id"],
@@ -560,7 +582,121 @@ def ensure_preflight_preview(image: dict, manifest: ImageManifest) -> tuple[dict
         "review_overlay_path": str(artifacts.review_overlay_path),
         "output_log_path": str(artifacts.output_log_path),
         "preflight_json": serialize_preflight(report.model_dump()),
-    }, report, artifacts.preview_payload
+    }, report, artifacts.preview_payload, effective_manifest
+
+
+def unpack_preflight_result(
+    result: tuple,
+    fallback_manifest: ImageManifest,
+) -> tuple[dict[str, str | None], PreflightReport, dict, ImageManifest]:
+    if len(result) == 4:
+        preview_fields, report, preview_payload, effective_manifest = result
+        return preview_fields, report, preview_payload, effective_manifest
+    preview_fields, report, preview_payload = result
+    return preview_fields, report, preview_payload, fallback_manifest
+
+
+def maybe_apply_panel_crop_fallback(
+    image: dict,
+    manifest: ImageManifest,
+    report: PreflightReport,
+) -> tuple[ImageManifest, PreflightArtifacts, PreflightReport] | None:
+    if not should_try_panel_crop_fallback(manifest, report):
+        return None
+
+    for candidate in build_panel_crop_candidates(manifest):
+        try:
+            artifacts = digitizer_runner.run_preflight(
+                batch_id=image["batch_id"],
+                image_id=f"{image['id']}-fallback",
+                image_path=Path(image["original_path"]),
+                manifest=candidate,
+            )
+            candidate_report = build_preflight_report(
+                manifest=candidate,
+                prepared_path=artifacts.prepared_path,
+                preview_payload=artifacts.preview_payload,
+            )
+        except Exception:
+            continue
+
+        if not candidate_report.blocking:
+            return candidate, artifacts, candidate_report
+
+    return None
+
+
+def should_try_panel_crop_fallback(manifest: ImageManifest, report: PreflightReport) -> bool:
+    has_crop = all(
+        value is not None
+        for value in (manifest.crop_left, manifest.crop_top, manifest.crop_right, manifest.crop_bottom)
+    )
+    has_masks = bool(manifest.exclusion_regions or manifest.exclusion_polygons)
+    if has_crop or has_masks:
+        return False
+
+    for check in report.checks:
+        if check.id == "axis-detection" and check.status == "fail":
+            return True
+    return False
+
+
+def build_panel_crop_candidates(manifest: ImageManifest) -> list[ImageManifest]:
+    hint_prefix = "Automatic panel crop suggestion: exclude the lower risk table/caption and keep the full KM panel."
+    notes_prefix = (
+        "Automatic fallback crop was generated because full-image axis detection failed. "
+        "Review the crop before rerun."
+    )
+
+    def merged_text(prefix: str, existing: str | None) -> str:
+        return f"{prefix} {existing}".strip() if existing else prefix
+
+    common_updates = {
+        "review_required": True,
+        "crop_hint": merged_text(hint_prefix, manifest.crop_hint),
+        "notes": merged_text(notes_prefix, manifest.notes),
+    }
+
+    def candidate(**updates: object) -> ImageManifest:
+        payload = manifest.model_dump()
+        payload.update(common_updates)
+        payload.update(updates)
+        return ImageManifest.model_validate(payload)
+
+    return [
+        candidate(
+            crop_left=0.12,
+            crop_top=0.02,
+            crop_right=0.94,
+            crop_bottom=0.64,
+            exclusion_regions=[
+                {
+                    "left": 0.58,
+                    "top": 0.02,
+                    "right": 0.98,
+                    "bottom": 0.24,
+                    "label": "summary block",
+                }
+            ],
+            exclusion_polygons=[],
+        ),
+        candidate(
+            crop_left=0.14,
+            crop_top=0.02,
+            crop_right=0.92,
+            crop_bottom=0.60,
+            exclusion_regions=[],
+            exclusion_polygons=[],
+        ),
+        candidate(
+            crop_left=0.12,
+            crop_top=0.02,
+            crop_right=0.94,
+            crop_bottom=0.60,
+            exclusion_regions=[],
+            exclusion_polygons=[],
+        ),
+    ]
 
 
 def parse_optional_float(value: str) -> float | None:
@@ -904,7 +1040,10 @@ def build_review_message(
     if report.blocking:
         reasons.append(first_blocking_message(report.model_dump()))
     if manifest.review_required and not report.blocking:
-        reasons.append("Manifest needs review before digitization.")
+        if manifest.crop_hint and manifest.crop_hint.startswith("Automatic panel crop suggestion:"):
+            reasons.append(f"{manifest.crop_hint} Review the crop before digitization.")
+        else:
+            reasons.append("Manifest needs review before digitization.")
     elif apply_threshold and manifest.llm_confidence < threshold and not manifest.review_required:
         reasons.append(f"Confidence {manifest.llm_confidence:.2f} is below the batch threshold of {threshold:.2f}.")
     elif not report.blocking and report.warnings:
