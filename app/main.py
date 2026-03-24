@@ -15,7 +15,7 @@ from fastapi.templating import Jinja2Templates
 
 from .config import settings
 from .manifest_service import ManifestService
-from .preflight import build_preflight_report
+from .preflight import build_preflight_report, build_suggested_preparation
 from .runner import DigitizerRunner, PreflightArtifacts
 from .schemas import ImageManifest, PreflightReport
 from .store import (
@@ -125,6 +125,7 @@ def batch_detail(request: Request, batch_id: str):
             "request": request,
             "batch": batch,
             "batch_runtime_progress": build_batch_runtime_progress(batch),
+            "review_breakdown": build_review_breakdown(batch),
         },
     )
 
@@ -157,6 +158,7 @@ def image_detail(request: Request, image_id: str):
             "batch": batch,
             "review_workflow": review_workflow,
             "runtime_progress": build_image_runtime_progress(image),
+            "review_breakdown": build_review_breakdown(batch) if batch else {},
         },
     )
 
@@ -344,12 +346,12 @@ def rerun_image(image_id: str):
         return RedirectResponse(url=f"/images/{image_id}", status_code=303)
 
     preflight_report = image.get("preflight_report")
-    if preflight_report and preflight_report.get("blocking"):
+    if image.get("effective_preflight_blocking"):
         update_image(
             settings,
             image_id,
             status="needs_review",
-            error_message=first_blocking_message(preflight_report),
+            error_message=image.get("user_message") or first_blocking_message(preflight_report),
         )
         append_image_log(
             settings,
@@ -457,6 +459,39 @@ def process_single_image(image_id: str, regenerate_manifest: bool) -> None:
             manifest=manifest_for_run,
             prepared_path=Path(preview_fields["prepared_path"]) if preview_fields.get("prepared_path") else None,
         )
+        integrity_issue = assess_output_integrity(manifest_for_run, output_meta_path)
+        if integrity_issue is not None:
+            review_report = report.model_copy(
+                update={
+                    "review_reason": "needs_axis_review",
+                    "diagnostic_category": "suspicious_output",
+                    "blocking": False,
+                    "warnings": [integrity_issue["message"], *report.warnings],
+                }
+            )
+            manifest_for_review = manifest_for_run.model_copy(update={"review_required": True})
+            update_image(
+                settings,
+                image_id,
+                prepared_path=str(prepared_path),
+                annotated_path=str(annotated_path),
+                output_csv_path=str(output_csv_path),
+                output_meta_path=str(output_meta_path),
+                output_log_path=str(output_log_path),
+                manifest_json=serialize_manifest(manifest_for_review.model_dump()),
+                preflight_json=serialize_preflight(review_report.model_dump()),
+                status="needs_review",
+                error_message=integrity_issue["message"],
+                review_required=1,
+            )
+            append_image_log(
+                settings,
+                image_id,
+                "needs_review",
+                integrity_issue["message"],
+                level="warning",
+            )
+            return
         update_image(
             settings,
             image_id,
@@ -509,6 +544,34 @@ def process_prepared_image(image_id: str) -> None:
             manifest=manifest,
             prepared_path=prepared_path,
         )
+        integrity_issue = assess_output_integrity(manifest, output_meta_path)
+        if integrity_issue is not None:
+            existing_preflight = image.get("preflight_report") or {}
+            existing_preflight.update(
+                {
+                    "blocking": False,
+                    "review_reason": "needs_axis_review",
+                    "diagnostic_category": "suspicious_output",
+                    "warnings": [integrity_issue["message"], *existing_preflight.get("warnings", [])],
+                }
+            )
+            manifest_for_review = manifest.model_copy(update={"review_required": True})
+            update_image(
+                settings,
+                image_id,
+                prepared_path=str(prepared_path),
+                annotated_path=str(annotated_path),
+                output_csv_path=str(output_csv_path),
+                output_meta_path=str(output_meta_path),
+                output_log_path=str(output_log_path),
+                manifest_json=serialize_manifest(manifest_for_review.model_dump()),
+                preflight_json=serialize_preflight(existing_preflight),
+                status="needs_review",
+                error_message=integrity_issue["message"],
+                review_required=1,
+            )
+            append_image_log(settings, image_id, "needs_review", integrity_issue["message"], level="warning")
+            return
         update_image(
             settings,
             image_id,
@@ -616,6 +679,7 @@ def maybe_apply_panel_crop_fallback(
                 manifest=candidate,
                 prepared_path=artifacts.prepared_path,
                 preview_payload=artifacts.preview_payload,
+                suggested_preparation=build_suggested_preparation(candidate, "heuristic"),
             )
         except Exception:
             continue
@@ -733,15 +797,32 @@ def build_export_archive(batch: dict) -> Path:
 
     summary_buffer = io.StringIO()
     writer = csv.writer(summary_buffer)
-    writer.writerow(["image_id", "filename", "status", "confidence", "review_required", "error"])
+    writer.writerow(
+        [
+            "image_id",
+            "filename",
+            "status",
+            "status_label",
+            "review_reason",
+            "diagnostic_category",
+            "preflight_version",
+            "confidence",
+            "review_required",
+            "message",
+        ]
+    )
     for image in batch["images"]:
         writer.writerow([
             image["id"],
             image["filename"],
             image["status"],
+            image.get("status_badge_label") or "",
+            image.get("review_reason") or "",
+            image.get("diagnostic_category") or "",
+            image.get("preflight_version") or "",
             image.get("llm_confidence") or "",
             image.get("review_required"),
-            image.get("error_message") or "",
+            image.get("user_message") or image.get("error_message") or "",
         ])
 
     with zipfile.ZipFile(export_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -821,41 +902,56 @@ def first_blocking_check(preflight_report: dict | None) -> dict | None:
 def build_review_workflow(image: dict) -> dict:
     manifest = image.get("manifest") or {}
     preflight_report = image.get("preflight_report") or {}
-    blocking_check = first_blocking_check(preflight_report)
+    blocking_check = first_blocking_check(preflight_report) if image.get("effective_preflight_blocking") else None
     has_crop = all(
         manifest.get(field_name) is not None
         for field_name in ("crop_left", "crop_top", "crop_right", "crop_bottom")
     )
     has_masks = bool(manifest.get("exclusion_regions") or manifest.get("exclusion_polygons"))
-
+    review_reason = image.get("review_reason") or "needs_axis_review"
     blocker_hint = build_blocker_hint(blocking_check)
-    default_message = (
-        "Start with one crop box around the KM panel. Keep the full x-axis, y-axis, tick marks, and axis labels inside it."
-        if not has_crop
-        else blocker_hint
-    )
+    stale_report = bool(image.get("preflight_stale"))
+    current_message = image.get("user_message") or blocker_hint
 
-    if has_masks and not has_crop:
-        badge = "crop required"
+    default_message = {
+        "needs_crop": "Start with one crop box around the KM panel. Keep the full x-axis, y-axis, tick marks, and axis labels inside it.",
+        "needs_axis_review": "The panel isolation looks usable. Confirm the axis limits and every visible tick increment before rerun.",
+        "ready_to_run": "The current crop, masks, and axis settings look consistent enough to continue into extraction.",
+        "engine_failed": "This image hit a runtime failure after review. Check the run log before retrying.",
+    }.get(review_reason, blocker_hint)
+
+    if review_reason == "needs_crop":
+        badge = "Needs Crop"
         badge_class = "needs_review"
-        primary_action_label = "Step 1: Draw Crop First"
-        current_message = (
-            "Masks are already saved, but the page still needs a crop box around the plot panel. "
-            "Until that crop exists, rerun will only pause in review again."
-        )
-        primary_action_disabled = True
-    elif preflight_report.get("blocking"):
-        badge = "recheck needed"
+        if not has_crop:
+            primary_action_label = "Step 1: Draw Crop First"
+            primary_action_disabled = True
+            current_message = (
+                "Draw the crop first. Keep the full axes and labels inside the crop, then use Mask only for tables, legends, or summary blocks outside the plot."
+            )
+        elif stale_report or image.get("effective_preflight_blocking"):
+            primary_action_label = "Save Changes and Recheck"
+            primary_action_disabled = False
+        else:
+            primary_action_label = "Use Crop and Rerun"
+            primary_action_disabled = False
+    elif review_reason == "needs_axis_review":
+        badge = "Needs Axis Review"
         badge_class = "needs_review"
-        primary_action_label = "Save Changes and Recheck"
-        current_message = blocker_hint
+        primary_action_label = "Save Changes and Recheck" if stale_report or image.get("effective_preflight_blocking") else "Confirm Axes and Rerun"
+        primary_action_disabled = False
+    elif review_reason == "engine_failed":
+        badge = "Engine Failed"
+        badge_class = "failed"
+        primary_action_label = "Save Changes and Retry"
         primary_action_disabled = False
     else:
-        badge = "ready"
+        badge = "Ready To Run"
         badge_class = "completed"
         primary_action_label = "Use Crop and Rerun"
         current_message = (
-            "The crop and mask setup is ready. Use the main button to re-run pre-flight and continue into extraction."
+            image.get("user_message")
+            or "The crop and axis settings are ready. Use the main action to rerun extraction."
         )
         primary_action_disabled = False
 
@@ -873,15 +969,15 @@ def build_review_workflow(image: dict) -> dict:
             "state": "done" if has_masks else ("ready" if has_crop else "pending"),
         },
         {
-            "id": "preview",
-            "title": "Check The Preview",
-            "body": "The preview below should show only the plot panel you want extracted. If text or tables remain, tighten the crop or add masks.",
-            "state": "ready" if has_crop else "pending",
+            "id": "axis",
+            "title": "Confirm Axes",
+            "body": "Check that the x/y limits and every visible tick increment match the panel in the preview.",
+            "state": "done" if review_reason == "ready_to_run" and not stale_report else ("active" if has_crop else "pending"),
         },
         {
             "id": "rerun",
-            "title": "Recheck And Run",
-            "body": "When the crop looks right, use the main button. If pre-flight still blocks, the blocker note above tells you what to correct next.",
+            "title": "Run Extraction",
+            "body": "Use the main action to rerun pre-flight and continue. If the image pauses again, the blocker note above tells you what to fix next.",
             "state": "ready" if has_crop else "pending",
         },
     ]
@@ -892,12 +988,16 @@ def build_review_workflow(image: dict) -> dict:
         "current_message": current_message,
         "default_message": default_message,
         "blocker_hint": blocker_hint,
-        "blocking": bool(preflight_report.get("blocking")),
+        "blocking": bool(image.get("effective_preflight_blocking")),
         "has_crop": has_crop,
         "has_masks": has_masks,
         "primary_action_label": primary_action_label,
         "primary_action_disabled": primary_action_disabled,
         "steps": steps,
+        "review_reason": review_reason,
+        "review_reason_label": image.get("review_reason_label"),
+        "diagnostic_label": image.get("diagnostic_label"),
+        "preflight_stale": stale_report,
     }
 
 
@@ -931,6 +1031,43 @@ def build_blocker_hint(blocking_check: dict | None) -> str:
         ),
     }
     return blocker_hints.get(blocker_id, blocker_message)
+
+
+def build_review_breakdown(batch: dict | None) -> dict[str, int]:
+    images = (batch or {}).get("images") or []
+    return {
+        "needs_crop": sum(1 for image in images if image.get("status") == "needs_review" and image.get("review_reason") == "needs_crop"),
+        "needs_axis_review": sum(1 for image in images if image.get("status") == "needs_review" and image.get("review_reason") == "needs_axis_review"),
+        "ready_to_run": sum(1 for image in images if image.get("status") == "needs_review" and image.get("review_reason") == "ready_to_run"),
+        "engine_failed": sum(1 for image in images if image.get("status") == "failed"),
+    }
+
+
+def assess_output_integrity(manifest: ImageManifest, output_meta_path: Path) -> dict[str, str] | None:
+    try:
+        meta = json.loads(output_meta_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        return {"message": f"Completed run wrote unreadable metadata: {error}"}
+
+    overlay = meta.get("overlay") or {}
+    curves = overlay.get("curves") or []
+    total_points = overlay.get("total_points")
+
+    if not isinstance(total_points, int) or total_points <= 0:
+        return {"message": "Completed run did not produce usable overlay points. Review the crop and axis settings before accepting the result."}
+
+    if len(curves) != manifest.num_curves:
+        return {
+            "message": (
+                f"Completed run produced {len(curves)} curve overlay group(s), but the manifest expects "
+                f"{manifest.num_curves}. Review the curve count and axis settings before accepting the result."
+            )
+        }
+
+    if any(int(curve.get("point_count") or 0) < 3 for curve in curves):
+        return {"message": "Completed run produced an under-specified overlay for at least one curve. Review the crop and axis settings before accepting the result."}
+
+    return None
 
 
 def build_image_runtime_progress(image: dict) -> dict | None:
@@ -1001,6 +1138,7 @@ def build_batch_runtime_progress(batch: dict) -> dict | None:
     digitizer_count = sum(1 for image in images if image.get("status") == "processing_digitizer")
     review_count = sum(1 for image in images if image.get("status") == "needs_review")
     completed_count = sum(1 for image in images if image.get("status") == "completed")
+    review_breakdown = build_review_breakdown(batch)
 
     if manifest_count > 0:
         headline = "Reading uploaded figures"
@@ -1020,6 +1158,10 @@ def build_batch_runtime_progress(batch: dict) -> dict | None:
         detail_parts.append(f"{queued_count} queued")
     if review_count:
         detail_parts.append(f"{review_count} in review")
+    if review_breakdown["needs_crop"]:
+        detail_parts.append(f"{review_breakdown['needs_crop']} need crop")
+    if review_breakdown["needs_axis_review"]:
+        detail_parts.append(f"{review_breakdown['needs_axis_review']} need axis review")
     if completed_count:
         detail_parts.append(f"{completed_count} completed")
 
@@ -1040,10 +1182,10 @@ def build_review_message(
     if report.blocking:
         reasons.append(first_blocking_message(report.model_dump()))
     if manifest.review_required and not report.blocking:
-        if manifest.crop_hint and manifest.crop_hint.startswith("Automatic panel crop suggestion:"):
+        if report.review_reason == "needs_crop" and manifest.crop_hint:
             reasons.append(f"{manifest.crop_hint} Review the crop before digitization.")
         else:
-            reasons.append("Manifest needs review before digitization.")
+            reasons.append("Axis settings still need manual confirmation before digitization.")
     elif apply_threshold and manifest.llm_confidence < threshold and not manifest.review_required:
         reasons.append(f"Confidence {manifest.llm_confidence:.2f} is below the batch threshold of {threshold:.2f}.")
     elif not report.blocking and report.warnings:

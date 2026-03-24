@@ -290,7 +290,8 @@ class MainFlowTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("Manual Crop Review", response.text)
-        self.assertIn("Use Crop and Rerun", response.text)
+        self.assertIn("Step 1: Draw Crop First", response.text)
+        self.assertIn("Needs Crop", response.text)
         self.assertIn("Zoom", response.text)
         self.assertIn("manual crop recommended", response.text)
         self.assertIn("zoom-slider", response.text)
@@ -336,7 +337,8 @@ class MainFlowTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("What To Do Next", response.text)
         self.assertIn("Step 1: Draw Crop First", response.text)
-        self.assertIn("Masks are already saved, but the page still needs a crop box", response.text)
+        self.assertIn("Draw the crop first", response.text)
+        self.assertIn("Needs Crop", response.text)
         self.assertIn("exclusion-regions-input", response.text)
         self.assertIn("Mask unlocks after the crop is set", response.text)
         self.assertIn("Draw the crop box first to unlock Mask.", response.text)
@@ -560,8 +562,22 @@ class MainFlowTests(unittest.TestCase):
         output_csv_path = self.root / "result.csv"
         output_meta_path = self.root / "result.meta.json"
         output_log_path = self.root / "result.log"
-        for path in [prepared_path, annotated_path, output_csv_path, output_meta_path, output_log_path]:
+        for path in [prepared_path, annotated_path, output_csv_path, output_log_path]:
             path.write_text("ok", encoding="utf-8")
+        output_meta_path.write_text(
+            json.dumps(
+                {
+                    "overlay": {
+                        "total_points": 20,
+                        "curves": [
+                            {"curve": 1, "point_count": 10},
+                            {"curve": 2, "point_count": 10},
+                        ],
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
 
         with (
             mock.patch.object(main, "ensure_preflight_preview", return_value=preflight_result),
@@ -580,6 +596,67 @@ class MainFlowTests(unittest.TestCase):
         self.assertEqual(Path(image["output_csv_path"]), output_csv_path)
         stages = [entry["stage"] for entry in image["processing_log"]]
         self.assertEqual(stages, ["manifest_loaded", "processing_digitizer", "completed"])
+
+    def test_process_single_image_pauses_on_suspicious_completed_output(self) -> None:
+        manifest = ImageManifest(
+            image_id=self.image_id,
+            filename="test.png",
+            num_curves=2,
+            x_start=0,
+            x_end=60,
+            x_increment=10,
+            y_start=0,
+            y_end=100,
+            y_increment=25,
+            y_text_vertical=True,
+            rotation=0,
+            crop_hint=None,
+            notes="integrity-check",
+            llm_confidence=0.9,
+            review_required=False,
+        )
+        update_image(
+            self.settings,
+            self.image_id,
+            manifest_json=serialize_manifest(manifest.model_dump()),
+            review_required=0,
+            status="queued",
+        )
+        preflight_result = self.make_preflight_result()
+
+        prepared_path = self.root / "prepared.png"
+        annotated_path = self.root / "annotated.png"
+        output_csv_path = self.root / "result.csv"
+        output_meta_path = self.root / "result.meta.json"
+        output_log_path = self.root / "result.log"
+        for path in [prepared_path, annotated_path, output_csv_path, output_log_path]:
+            path.write_text("ok", encoding="utf-8")
+        output_meta_path.write_text(
+            json.dumps(
+                {
+                    "overlay": {
+                        "total_points": 4,
+                        "curves": [{"curve": 1, "point_count": 4}],
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with (
+            mock.patch.object(main, "ensure_preflight_preview", return_value=preflight_result),
+            mock.patch.object(
+                main.digitizer_runner,
+                "run",
+                return_value=(prepared_path, output_csv_path, output_meta_path, output_log_path, annotated_path),
+            ),
+        ):
+            main.process_single_image(self.image_id, False)
+
+        image = get_image(self.settings, self.image_id)
+        self.assertEqual(image["status"], "needs_review")
+        self.assertEqual(image["review_reason"], "needs_axis_review")
+        self.assertEqual(image["diagnostic_category"], "suspicious_output")
 
     def test_export_batch_includes_annotated_overlay(self) -> None:
         annotated_path = self.root / "annotated.png"

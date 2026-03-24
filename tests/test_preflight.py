@@ -6,7 +6,7 @@ import unittest
 
 from PIL import Image
 
-from app.preflight import build_preflight_report
+from app.preflight import PREFLIGHT_VERSION, build_preflight_report
 from app.schemas import ImageManifest
 
 
@@ -140,6 +140,9 @@ class PreflightReportTests(unittest.TestCase):
         report = build_preflight_report(self.manifest, self.prepared_path, payload)
 
         self.assertTrue(report.blocking)
+        self.assertEqual(report.review_reason, "needs_crop")
+        self.assertEqual(report.diagnostic_category, "collapsed_plot_bounds")
+        self.assertEqual(report.preflight_version, PREFLIGHT_VERSION)
         self.assertTrue(any(check.stage == "axis_preflight" and check.status == "fail" for check in report.checks))
 
     def test_warns_when_cleaned_object_count_is_sparse(self) -> None:
@@ -189,6 +192,8 @@ class PreflightReportTests(unittest.TestCase):
         report = build_preflight_report(self.manifest, self.prepared_path, payload)
 
         self.assertFalse(report.blocking)
+        self.assertEqual(report.review_reason, "ready_to_run")
+        self.assertEqual(report.diagnostic_category, "range_calibration_sparse")
         self.assertTrue(any(check.stage == "range_preflight" and check.status == "warn" for check in report.checks))
 
     def test_warns_when_axis_spans_are_valid_even_if_only_one_axis_has_pixel_increment(self) -> None:

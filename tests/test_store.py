@@ -88,6 +88,36 @@ class StoreLoggingTests(unittest.TestCase):
         self.assertTrue(image["preflight_report"]["blocking"])
         self.assertEqual(image["preflight_report"]["metrics"]["plot_width"], 2)
 
+    def test_stale_preflight_does_not_block_effective_review_state(self) -> None:
+        batch_id = create_batch(self.settings, "stale-preflight", 1)
+        image_path = self.settings.upload_dir / "image.png"
+        image_path.parent.mkdir(parents=True, exist_ok=True)
+        image_path.write_bytes(b"test")
+        image_id = create_image(self.settings, batch_id, "image.png", str(image_path))
+
+        update_image(
+            self.settings,
+            image_id,
+            status="needs_review",
+            review_required=1,
+            preflight_json=serialize_preflight(
+                {
+                    "blocking": True,
+                    "checks": [{"id": "axis-plot-size", "status": "fail"}],
+                    "warnings": ["collapsed axis"],
+                    "metrics": {"plot_width": 2},
+                    "preflight_version": "legacy",
+                    "review_reason": "needs_crop",
+                    "diagnostic_category": "collapsed_plot_bounds",
+                }
+            ),
+        )
+
+        image = get_image(self.settings, image_id)
+
+        self.assertTrue(image["preflight_stale"])
+        self.assertFalse(image["effective_preflight_blocking"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -5,7 +5,7 @@ import math
 
 from PIL import Image
 
-from .schemas import ImageManifest, PreflightCheck, PreflightReport
+from .schemas import ImageManifest, PreflightCheck, PreflightReport, SuggestedCrop, SuggestedPreparation
 
 
 MIN_PREPARED_WIDTH = 160
@@ -18,12 +18,35 @@ WARN_MASK_COVERAGE = 0.25
 FAIL_MASK_COVERAGE = 0.45
 WARN_OBJECT_COUNT = 500
 FAIL_OBJECT_COUNT = 60
+PREFLIGHT_VERSION = "2026-03-23-reset-1"
+
+CHECK_DIAGNOSTIC_CATEGORIES = {
+    "manifest-crop-required": "layout_axis_failure",
+    "manifest-exclusions": "mask_overlaps_axis",
+    "prepared-size": "layout_axis_failure",
+    "prepared-mask-coverage": "mask_overlaps_axis",
+    "prepared-axis-contact": "layout_axis_failure",
+    "axis-detection": "layout_axis_failure",
+    "axis-plot-size": "collapsed_plot_bounds",
+    "axis-aspect-ratio": "collapsed_plot_bounds",
+    "axis-spans": "layout_axis_failure",
+    "cluster-clean-figure": "layout_axis_failure",
+    "cluster-object-count": "collapsed_plot_bounds",
+    "range-detection": "range_calibration_sparse",
+    "range-break-match": "range_calibration_sparse",
+}
+NEEDS_CROP_CATEGORIES = {
+    "layout_axis_failure",
+    "collapsed_plot_bounds",
+    "mask_overlaps_axis",
+}
 
 
 def build_preflight_report(
     manifest: ImageManifest,
     prepared_path: Path,
     preview_payload: dict,
+    suggested_preparation: SuggestedPreparation | None = None,
 ) -> PreflightReport:
     metrics = dict(preview_payload.get("metrics") or {})
     stage_errors = list(preview_payload.get("stage_errors") or [])
@@ -49,12 +72,63 @@ def build_preflight_report(
 
     warnings = [check.message for check in checks if check.status != "pass"]
     blocking = any(check.status == "fail" and check.severity == "blocking" for check in checks)
+    review_reason, diagnostic_category = _classify_preflight_state(checks, blocking, suggested_preparation)
     return PreflightReport(
         blocking=blocking,
         checks=checks,
         warnings=warnings,
         metrics=metrics,
+        review_reason=review_reason,
+        diagnostic_category=diagnostic_category,
+        preflight_version=PREFLIGHT_VERSION,
+        suggested_preparation=suggested_preparation,
     )
+
+
+def build_suggested_preparation(manifest: ImageManifest, source: str) -> SuggestedPreparation | None:
+    has_crop = all(
+        value is not None
+        for value in (manifest.crop_left, manifest.crop_top, manifest.crop_right, manifest.crop_bottom)
+    )
+    if not has_crop and not manifest.exclusion_regions:
+        return None
+
+    crop = None
+    if has_crop:
+        crop = SuggestedCrop(
+            left=manifest.crop_left,
+            top=manifest.crop_top,
+            right=manifest.crop_right,
+            bottom=manifest.crop_bottom,
+        )
+
+    return SuggestedPreparation(
+        source=source,
+        crop=crop,
+        exclusion_regions=list(manifest.exclusion_regions),
+    )
+
+
+def _classify_preflight_state(
+    checks: list[PreflightCheck],
+    blocking: bool,
+    suggested_preparation: SuggestedPreparation | None,
+) -> tuple[str, str]:
+    target_checks = [check for check in checks if check.status == ("fail" if blocking else "warn")]
+    primary_check = target_checks[0] if target_checks else None
+    diagnostic_category = CHECK_DIAGNOSTIC_CATEGORIES.get(
+        primary_check.id if primary_check else "",
+        "ready_to_run" if not blocking else "layout_axis_failure",
+    )
+
+    if blocking:
+        review_reason = "needs_crop" if diagnostic_category in NEEDS_CROP_CATEGORIES else "needs_axis_review"
+        return review_reason, diagnostic_category
+
+    if suggested_preparation is not None:
+        return "needs_crop", "layout_axis_failure"
+
+    return "ready_to_run", diagnostic_category
 
 
 def _build_manifest_checks(manifest: ImageManifest, metrics: dict, preview_payload: dict) -> list[PreflightCheck]:

@@ -10,9 +10,10 @@
             <p class="panel-hint">Batch <a href="/batches/{{ batch.id }}">{{ batch.label }}</a></p>
         </div>
         <div class="actions">
-            <span class="status {{ image.status }}">{{ image.status }}</span>
+            <span class="status {{ image.status }}">{{ image.status_badge_label }}</span>
             {% set action_manifest = image.manifest or {} %}
-            {% set rerun_blocked = (action_manifest and action_manifest.review_required) or (image.preflight_report and image.preflight_report.blocking) %}
+            {% set rerun_blocked = (action_manifest and action_manifest.review_required) or image.effective_preflight_blocking %}
+            {% if image.status != "needs_review" %}
             <form action="/images/{{ image.id }}/rerun" method="post">
                 <button type="submit" class="btn btn-primary" {% if rerun_blocked %}disabled{% endif %}>
                     {% if rerun_blocked %}
@@ -22,10 +23,20 @@
                     {% endif %}
                 </button>
             </form>
+            {% endif %}
         </div>
     </div>
-    {% if image.error_message %}
-    <div class="warning-box">{{ image.error_message }}</div>
+    {% if image.user_message %}
+    <div class="warning-box">{{ image.user_message }}</div>
+    {% endif %}
+    {% if image.review_reason %}
+    <div class="summary-row">
+        <span class="status {{ 'needs_review' if image.review_reason != 'ready_to_run' else 'completed' }}">{{ image.review_reason_label }}</span>
+        <span>{{ image.diagnostic_label }}</span>
+        {% if image.preflight_version %}
+        <span>Pre-flight {{ image.preflight_version }}{% if image.preflight_stale %} (stale){% endif %}</span>
+        {% endif %}
+    </div>
     {% endif %}
     {% if image.status in ["queued", "processing_manifest", "processing_digitizer"] %}
     <div class="state-banner state-banner-processing">
@@ -87,7 +98,7 @@
                     {% endfor %}
                 </div>
             </div>
-            {% if manifest.crop_hint or review_flag %}
+            {% if manifest.crop_hint or review_flag or review_workflow.review_reason == "needs_crop" %}
             <div class="crop-review-callout">
                 <strong>Manual crop check</strong>
                 <span>{{ manifest.crop_hint if manifest.crop_hint else "OpenAI flagged this image for manual crop review before extraction. Keep the full axes and labels inside the crop, then draw masks over tables or summaries." }}</span>
@@ -317,8 +328,14 @@
         </div>
         {% if image.preflight_report %}
         <div class="actions">
-            <span class="status {{ 'needs_review' if image.preflight_report.blocking else 'completed' }}">
-                {{ 'blocking' if image.preflight_report.blocking else 'ready' }}
+            <span class="status {{ 'needs_review' if image.effective_preflight_blocking else ('failed' if image.review_reason == 'engine_failed' else 'completed') }}">
+                {% if image.preflight_stale %}
+                stale
+                {% elif image.effective_preflight_blocking %}
+                {{ image.review_reason_label }}
+                {% else %}
+                {{ image.review_reason_label if image.review_reason else 'Ready To Run' }}
+                {% endif %}
             </span>
         </div>
         {% endif %}
@@ -347,6 +364,9 @@
     </div>
     {% else %}
     <p class="panel-hint">No pre-flight report has been saved yet. Save review or run the image to generate one.</p>
+    {% endif %}
+    {% if image.preflight_stale %}
+    <p class="panel-hint">Saved pre-flight checks came from an older workflow version and will be refreshed on the next save or rerun.</p>
     {% endif %}
 </section>
 <section class="panel">

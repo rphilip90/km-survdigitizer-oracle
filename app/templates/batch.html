@@ -74,8 +74,12 @@
             <span>Ready results</span>
         </div>
         <div class="metric-card">
-            <strong>{{ stage.review }}</strong>
-            <span>Awaiting review</span>
+            <strong>{{ review_breakdown.needs_crop }}</strong>
+            <span>Need crop</span>
+        </div>
+        <div class="metric-card">
+            <strong>{{ review_breakdown.needs_axis_review }}</strong>
+            <span>Need axis review</span>
         </div>
         <div class="metric-card">
             <strong>{{ running }}</strong>
@@ -83,7 +87,7 @@
         </div>
         <div class="metric-card">
             <strong>{{ stage.failed }}</strong>
-            <span>Need debugging</span>
+            <span>Engine failed</span>
         </div>
     </div>
 
@@ -154,27 +158,13 @@
                     <td>{{ image.filename }}</td>
                     <td>
                         <div class="status-stack">
-                            <span class="status {{ image.status }}">{{ image.status }}</span>
-                            <span class="status-copy">
-                                {% if image.status == "processing_manifest" %}
-                                Reading axes, tick spacing, and curve count.
-                                {% elif image.status == "processing_digitizer" %}
-                                Running the extraction workflow.
-                                {% elif image.status == "needs_review" %}
-                                Paused until you confirm or edit the manifest.
-                                {% elif image.status == "failed" %}
-                                Processing stopped with an error.
-                                {% elif image.status == "completed" %}
-                                Extraction finished successfully.
-                                {% else %}
-                                Waiting to start.
-                                {% endif %}
-                            </span>
+                            <span class="status {{ image.status }}">{{ image.status_badge_label }}</span>
+                            <span class="status-copy">{{ image.status_description }}</span>
                         </div>
                     </td>
                     <td>{% if image.llm_confidence is not none %}{{ "%.2f"|format(image.llm_confidence) }}{% else %}--{% endif %}</td>
-                    <td>{{ "Yes" if image.review_required else "No" }}</td>
-                    <td class="error-cell">{{ image.error_message or (image.latest_log.message if image.latest_log else "") }}</td>
+                    <td>{{ image.review_reason_label if image.status == "needs_review" else ("Yes" if image.review_required else "No") }}</td>
+                    <td class="error-cell">{{ image.user_message or (image.latest_log.message if image.latest_log else "") }}</td>
                     <td><a href="/images/{{ image.id }}" class="btn btn-small">Open</a></td>
                 </tr>
                 {% endfor %}

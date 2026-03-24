@@ -193,6 +193,27 @@ class ExclusionPolygon(BaseModel):
     label: str | None = None
 
 
+class SuggestedCrop(BaseModel):
+    left: float = Field(ge=0, le=1)
+    top: float = Field(ge=0, le=1)
+    right: float = Field(ge=0, le=1)
+    bottom: float = Field(ge=0, le=1)
+
+    @model_validator(mode="after")
+    def validate_bounds(self) -> "SuggestedCrop":
+        if self.right <= self.left:
+            raise ValueError("suggested crop right must be greater than left")
+        if self.bottom <= self.top:
+            raise ValueError("suggested crop bottom must be greater than top")
+        return self
+
+
+class SuggestedPreparation(BaseModel):
+    source: Literal["manual", "heuristic"]
+    crop: SuggestedCrop | None = None
+    exclusion_regions: list["ExclusionRegion"] = Field(default_factory=list)
+
+
 class PreflightCheck(BaseModel):
     id: str
     stage: Literal[
@@ -213,6 +234,11 @@ class PreflightReport(BaseModel):
     checks: list[PreflightCheck] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     metrics: dict[str, Any] = Field(default_factory=dict)
+    review_reason: Literal["needs_crop", "needs_axis_review", "ready_to_run", "engine_failed"] = "ready_to_run"
+    diagnostic_category: str = "ready_to_run"
+    preflight_version: str = "legacy"
+    suggested_preparation: SuggestedPreparation | None = None
 
 
 ImageManifest.model_rebuild()
+SuggestedPreparation.model_rebuild()
